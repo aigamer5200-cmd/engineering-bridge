@@ -1,0 +1,231 @@
+# Temporary one-shot smoke: verify the v1.2.1 Windows command-resolution
+# hotfix on a real windows-latest runner with the standard npm shim layout.
+#
+# Safety: no secrets, no API keys, no model calls, no APPLY, no user-config
+# writes, no git global config changes. PowerShell is CI orchestration only.
+name: Windows v1.2.1 smoke
+
+on:
+  push:
+    branches:
+      - windows-v1.2.1-smoke
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Install official CLIs
+        run: npm install -g @openai/codex @deepseek-ai/dsh
+
+      - name: Verify real npm Windows shim layout
+        run: |
+          $npmPrefix = (npm prefix -g).Trim()
+          $codexShim = Join-Path $npmPrefix "codex.cmd"
+          $dshShim = Join-Path $npmPrefix "dsh.cmd"
+
+          Write-Output "node --version: $(node --version)"
+          Write-Output "npm --version: $(npm --version)"
+          Write-Output "npm prefix -g: $npmPrefix"
+          Write-Output "codex.cmd: $codexShim"
+          Write-Output "dsh.cmd: $dshShim"
+
+          if (-not (Test-Path $codexShim)) {
+            throw "codex.cmd shim not found at $codexShim"
+          }
+
+          if (-not (Test-Path $dshShim)) {
+            throw "dsh.cmd shim not found at $dshShim"
+          }
+
+          $env:PATH = "$npmPrefix;$env:PATH"
+          Add-Content -Path $env:GITHUB_PATH -Value $npmPrefix
+
+      - name: Real resolver smoke (codex + dsh npm shims)
+        run: |
+          $script = Join-Path $env:RUNNER_TEMP "bridge-win-resolver-smoke.mjs"
+
+          $content = @'
+          import { accessSync, statSync } from "node:fs";
+          import { join, normalize } from "node:path";
+          import { spawnSync } from "node:child_process";
+          import { pathToFileURL } from "node:url";
+
+          const { resolveCommand } = await import(
+            pathToFileURL(
+              join(
+                process.cwd(),
+                "dist",
+                "src",
+                "executors",
+                "command-resolution.js"
+              )
+            ).href
+          );
+
+          function fail(message) {
+            console.error(`SMOKE FAIL: ${message}`);
+            process.exitCode = 1;
+            process.exit(1);
+          }
+
+          function assert(condition, message) {
+            if (!condition) fail(message);
+          }
+
+          function endsWithInsensitive(path, suffix) {
+            return normalize(path)
+              .toLowerCase()
+              .endsWith(normalize(suffix).toLowerCase());
+          }
+
+          function isRegularFile(path) {
+            try {
+              accessSync(path);
+              return statSync(path).isFile();
+            } catch {
+              return false;
+            }
+          }
+
+          const codex = resolveCommand(process.env, "codex", {
+            platform: "win32",
+            nodeTarget: ["@openai", "codex", "bin", "codex.js"]
+          });
+
+          assert(
+            codex.kind === "node-launcher",
+            `codex: expected node-launcher, got ${JSON.stringify(codex)}`
+          );
+
+          assert(
+            endsWithInsensitive(
+              codex.scriptPath,
+              join("@openai", "codex", "bin", "codex.js")
+            ),
+            `codex scriptPath does not end in @openai/codex/bin/codex.js: ${codex.scriptPath}`
+          );
+
+          assert(
+            isRegularFile(codex.scriptPath),
+            `codex scriptPath is not a regular file: ${codex.scriptPath}`
+          );
+
+          const dsh = resolveCommand(process.env, "dsh", {
+            platform: "win32",
+            nodeTarget: ["@deepseek-ai", "dsh", "lib", "bin.js"]
+          });
+
+          assert(
+            dsh.kind === "node-launcher",
+            `dsh: expected node-launcher, got ${JSON.stringify(dsh)}`
+          );
+
+          assert(
+            endsWithInsensitive(
+              dsh.scriptPath,
+              join("@deepseek-ai", "dsh", "lib", "bin.js")
+            ),
+            `dsh scriptPath does not end in @deepseek-ai/dsh/lib/bin.js: ${dsh.scriptPath}`
+          );
+
+          assert(
+            isRegularFile(dsh.scriptPath),
+            `dsh scriptPath is not a regular file: ${dsh.scriptPath}`
+          );
+
+          function runLauncher(label, scriptPath, candidateFlags) {
+            let last = "";
+
+            for (const flag of candidateFlags) {
+              last = flag;
+
+              const result = spawnSync(
+                process.execPath,
+                [scriptPath, flag],
+                {
+                  timeout: 30000,
+                  encoding: "utf8"
+                }
+              );
+
+              if (result.error) {
+                fail(
+                  `${label} launcher spawn error: ${
+                    result.error.code ?? result.error.message
+                  }`
+                );
+              }
+
+              if (result.status === 0) {
+                console.log(
+                  `${label} launcher smoke PASS (offline flag: ${flag})`
+                );
+                return;
+              }
+            }
+
+            fail(
+              `${label} launcher smoke FAIL: no offline flag exited 0 (last tried: ${last})`
+            );
+          }
+
+          runLauncher(
+            "Codex",
+            codex.scriptPath,
+            ["--help", "--version"]
+          );
+
+          runLauncher(
+            "DSH",
+            dsh.scriptPath,
+            ["--version", "--help"]
+          );
+
+          console.log("RESOLVER SMOKE PASS");
+          '@
+
+          [System.IO.File]::WriteAllText(
+            $script,
+            $content,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          node $script
+
+      - name: Windows focused executor tests
+        run: |
+          node --test --test-skip-pattern="POSIX:" `
+            dist/tests/unit/executors/command-resolution.test.js `
+            dist/tests/unit/executors/codex-executor.test.js `
+            dist/tests/unit/executors/dsh-executor.test.js
+
+      - name: Confirm clean working tree
+        run: |
+          $status = git status --short
+
+          if ($status) {
+            Write-Output $status
+            throw "working tree is polluted: $status"
+          }
+
+          Write-Output "git status --short: (clean)"
