@@ -1,9 +1,22 @@
+param(
+    [string]$ClipboardFile = "",
+    [string]$UrlFile = "",
+    [switch]$NoBrowser
+)
+
 $ErrorActionPreference = "Stop"
 
 $RuntimeRoot = "D:\Engineering_Bridge_System\runtime"
-$UrlFile = Join-Path $RuntimeRoot "chatgpt-recovery-url.txt"
-$HandoffFile = Join-Path $RuntimeRoot "recovery-handoff.txt"
+$DefaultUrlFile = Join-Path $RuntimeRoot "chatgpt-recovery-url.txt"
+$DefaultClipboardFile = Join-Path $RuntimeRoot "recovery-handoff.txt"
 $DefaultUrl = "https://chatgpt.com/"
+
+if (-not $UrlFile) {
+    $UrlFile = $DefaultUrlFile
+}
+if (-not $ClipboardFile) {
+    $ClipboardFile = $DefaultClipboardFile
+}
 
 $url = $DefaultUrl
 if (Test-Path $UrlFile) {
@@ -13,12 +26,16 @@ if (Test-Path $UrlFile) {
     }
 }
 
-if (Test-Path $HandoffFile) {
+if (Test-Path $ClipboardFile) {
     try {
-        Get-Content -LiteralPath $HandoffFile -Raw | Set-Clipboard
+        Get-Content -LiteralPath $ClipboardFile -Raw | Set-Clipboard
     } catch {
         # Clipboard support is best-effort; opening the recovery window is still useful.
     }
+}
+
+if ($NoBrowser) {
+    exit 0
 }
 
 $chromeCandidates = @(

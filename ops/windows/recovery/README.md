@@ -40,3 +40,18 @@ The deployed master launcher starts the watchdog after DS and Bridge are started
 Individual DS/Bridge stop paths also create maintenance suppression flags. Start paths remove those flags. This lets a user intentionally stop one channel while leaving the watchdog running for the other channel without the stopped service being automatically resurrected.
 
 `runtime\chatgpt-recovery-url.txt` may contain a `https://chatgpt.com/...` URL. When present, Recovery opens that target in a new Chrome window; otherwise it opens the ChatGPT home page.
+
+`OPEN_CHATGPT_RECOVERY.ps1` also accepts optional `-ClipboardFile` and `-UrlFile`
+arguments. Recovery keeps using its original defaults, while preventive GOAL
+rollover may reuse the same opener without copying its generated bootstrap into
+the Engineering Recovery runtime directory.
+
+`OPEN_GOAL_ROLLOVER.ps1 -ControlRoot <path>` is the preventive-rollover adapter.
+It fail-closes unless `CURRENT_HANDOFF`, the referenced handoff, and
+`NEXT_WINDOW_BOOTSTRAP.txt` all exist under the supplied control root. It then
+uses the shared ChatGPT opener to copy only the bootstrap to the clipboard and
+open a fresh browser window. The handoff remains the authority.
+
+Both opener scripts support `-NoBrowser` for non-destructive validation. This
+still exercises pointer/bootstrap validation and clipboard preparation without
+opening Chrome.
