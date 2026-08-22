@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { resolve } from "node:path";
 import test from "node:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
@@ -13,7 +14,7 @@ import { RegisteredWorkspaceTaskService } from "../../../src/tasks/registered-wo
 import type { KnowledgePreflightReceipt } from "../../../src/tasks/knowledge-preflight-receipt.js";
 import { RegisteredWorkspaceRegistry } from "../../../src/workspaces/registered-workspace-registry.js";
 
-const ROOT = "/registered/root";
+const ROOT = resolve(process.cwd(), "registered-root");
 
 const PREFLIGHT_RECEIPT: KnowledgePreflightReceipt = {
   knowledge_base_path: "D:/AI_Knowledge_Base",

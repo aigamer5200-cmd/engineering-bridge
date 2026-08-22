@@ -160,7 +160,11 @@ test("bind rejects paths outside approved roots, prefix siblings, and symlink es
   mkdirSync(join(outside, "target"));
   const sibling = `${approved}-sibling`;
   mkdirSync(join(sibling, "inner"), { recursive: true });
-  symlinkSync(join(outside, "target"), join(approved, "link"));
+  symlinkSync(
+    join(outside, "target"),
+    join(approved, "link"),
+    process.platform === "win32" ? "junction" : "dir"
+  );
   const onboarding = service(registry, catalog, [approved], gitInvocations);
 
   await expectCode(() => onboarding.bind({ project_path: join(outside, "target") }), "WORKSPACE_BOUNDARY_VIOLATION");

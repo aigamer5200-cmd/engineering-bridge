@@ -613,6 +613,8 @@ test("generate_controlled_patch and refine_controlled_patch accept omitted/codex
 test("submit_controlled_patch registers a submitted proposal and task_result reports source submitted without an executor", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "engineering-bridge-submit-")));
   execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: root });
+  execFileSync("git", ["config", "core.eol", "lf"], { cwd: root });
   execFileSync("git", ["config", "user.name", "Test User"], { cwd: root });
   execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
   writeFileSync(join(root, "note.txt"), "before\n");

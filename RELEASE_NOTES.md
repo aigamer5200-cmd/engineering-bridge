@@ -10,6 +10,11 @@
 - Interactive `continue` keeps the current task receipt while replacing only the turn instruction. A new generate/refine delegation receives only the receipt explicitly supplied for that call, so old proposal context is not silently inherited.
 - Omitting `preflight_receipt` preserves the legacy executor instruction byte-for-byte.
 
+### Windows release-gate test portability
+
+- Temporary Git fixtures now pin LF behavior instead of inheriting a developer's global `core.autocrlf`, directory-alias tests use Windows junctions where ordinary symlink privileges are unavailable, and synthetic workspace/catalog roots use platform-native absolute paths.
+- POSIX command-resolution tests now inject an explicit POSIX platform rather than assuming the host OS. This restores the local Windows full-suite release gate without weakening production workspace, patch, or executor checks.
+
 Controlled-patch proposals can now be generated and refined by either executor, while application remains a deterministic, model-free step.
 
 - `generate_controlled_patch` and `refine_controlled_patch` accept an optional `executor: "codex" | "dsh"`, selected per call and defaulting to `codex` when omitted; refinement never inherits the source proposal's executor.
