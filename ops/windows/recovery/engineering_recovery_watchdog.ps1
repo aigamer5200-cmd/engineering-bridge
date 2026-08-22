@@ -133,7 +133,26 @@ function Invoke-ControlBat([string]$Path) {
         throw "Control BAT missing: $Path"
     }
 
-    $process = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/c", "call `"$Path`"") -Wait -PassThru -WindowStyle Hidden
+    # Do not use Start-Process -Wait here. On Windows it can wait for the whole
+    # descendant process tree; DevSpace intentionally leaves its long-running
+    # node.exe child alive, which would deadlock the watchdog after a successful
+    # recovery. Wait only for the immediate cmd.exe wrapper to exit.
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = "cmd.exe"
+    $startInfo.Arguments = "/d /c call `"$Path`""
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw "Failed to start control BAT: $Path"
+    }
+
+    if (-not $process.WaitForExit(30000)) {
+        try { $process.Kill() } catch { }
+        throw "Control BAT did not return within 30 seconds: $Path"
+    }
+
     return $process.ExitCode
 }
 
@@ -179,11 +198,13 @@ function Open-RecoveryWindow {
         return
     }
 
+    Write-RecoveryLog "ACTION open-recovery-window"
     Start-Process -FilePath "powershell.exe" -ArgumentList @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
         "-File", "`"$OpenRecoveryScript`""
     ) -WindowStyle Hidden | Out-Null
+    Write-RecoveryLog "RESULT open-recovery-window launched"
 }
 
 function Repair-DevSpace([string]$Reason) {

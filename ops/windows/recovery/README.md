@@ -11,8 +11,19 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 - Three consecutive repairable failures are required before automatic recovery.
 - Unexpected processes owning a managed port are fail-closed: Recovery logs the condition and does not kill the process.
 - Missing DevSpace listeners reuse `START_DS_CHANNEL.bat`; an HTTP-unresponsive DevSpace uses `RESTART_DS_CHANNEL.bat`. Bridge recovery reuses `RESTART_BRIDGE_CHANNEL.bat`.
+- Recovery waits only for the immediate control BAT wrapper to return. It deliberately does **not** use PowerShell `Start-Process -Wait`, because that can wait for the long-running DevSpace `node.exe` descendant and deadlock the watchdog after a successful restart.
 - Successful automatic service recovery writes `runtime\recovery-handoff.txt` and `runtime\recovery-state.json`, then opens a fresh ChatGPT browser window and copies the handoff text to the clipboard.
 - A recovered Bridge task/thread is considered stale. The next ChatGPT window must start a fresh `run_task`; that creates a new native Codex thread instead of resuming an old Bridge task id.
+
+## Live fault validation
+
+On 2026-08-22 the production watchdog was validated with a real unexpected DevSpace process termination rather than the maintenance-aware stop path.
+
+- The first live test proved that the watchdog detected the missing `7677` listener and automatically restored DevSpace, but also exposed a control-wait deadlock after the service came back.
+- The wait implementation was corrected so only the immediate `cmd.exe` wrapper is awaited.
+- A second live test then passed end-to-end: DevSpace PID `49912` was forcibly terminated, the listener disappearance was observed, DevSpace recovered as PID `19960` in 40.7 seconds, local HTTP became responsive, `RECOVERY_END` was written, `runtime\recovery-state.json` recorded `automatic-service-recovery`, and the fresh ChatGPT recovery-window launcher was logged as launched.
+
+The destructive test driver itself is not retained in the production control directory; only the runtime validation logs are retained as operational evidence.
 
 ## Client-session recovery boundary
 
