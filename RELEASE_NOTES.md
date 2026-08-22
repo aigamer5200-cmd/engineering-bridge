@@ -1,6 +1,8 @@
 # Release notes
 
-## Unreleased
+## v1.2.1-biaogu.1 (custom fork)
+
+This custom build is based on upstream Engineering Bridge v1.2.1. The `biaogu.1` suffix identifies local workflow integration and avoids claiming or colliding with a future upstream v1.3.0 release.
 
 ### Bounded Knowledge Preflight Receipt
 
