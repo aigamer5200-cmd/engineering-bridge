@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ControlRoot,
     [string]$UrlFile = "D:\Engineering_Bridge_System\runtime\chatgpt-recovery-url.txt",
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$AutoSubmit
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,17 +41,52 @@ $openerArgs = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", $opener,
-    "-ClipboardFile", $bootstrap,
     "-UrlFile", $UrlFile
 )
+
+$payloadFile = $null
+if ($AutoSubmit) {
+    $payloadFile = [System.IO.Path]::GetTempFileName()
+    $bootstrapText = Get-Content -LiteralPath $bootstrap -Raw -ErrorAction Stop
+    $handoffText = Get-Content -LiteralPath $handoff -Raw -ErrorAction Stop
+    $payload = @"
+$bootstrapText
+
+--- AUTHORITATIVE HANDOFF TRANSPORT COPY ---
+Source: $handoff
+The durable handoff file named above remains the sole authority. The text below
+is a verbatim transport copy created only so this fresh browser session can
+continue without separately reading a machine-local runtime path.
+
+$handoffText
+--- END AUTHORITATIVE HANDOFF TRANSPORT COPY ---
+"@
+    Set-Content -LiteralPath $payloadFile -Value $payload -Encoding UTF8
+    $openerArgs += @("-ClipboardFile", $payloadFile)
+} else {
+    $openerArgs += @("-ClipboardFile", $bootstrap)
+}
 if ($NoBrowser) {
     $openerArgs += "-NoBrowser"
 }
-& powershell.exe @openerArgs
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+if ($AutoSubmit) {
+    $openerArgs += "-AutoSubmit"
+}
+try {
+    & powershell.exe @openerArgs
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+} finally {
+    if ($payloadFile -and (Test-Path $payloadFile)) {
+        Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "GOAL rollover window opened."
 Write-Host "Authority: $handoff"
-Write-Host "Bootstrap copied from: $bootstrap"
+if ($AutoSubmit) {
+    Write-Host "Bootstrap + authoritative handoff transport copy auto-submitted."
+} else {
+    Write-Host "Bootstrap copied from: $bootstrap"
+}

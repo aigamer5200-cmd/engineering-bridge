@@ -55,3 +55,19 @@ open a fresh browser window. The handoff remains the authority.
 Both opener scripts support `-NoBrowser` for non-destructive validation. This
 still exercises pointer/bootstrap validation and clipboard preparation without
 opening Chrome.
+
+`OPEN_GOAL_ROLLOVER.ps1 -AutoSubmit` is an explicit live-browser mode. The
+shared ChatGPT opener snapshots existing Chrome top-level windows, requires one
+new ChatGPT window from the current launch, uniquely locates its Chromium UIA
+`ProseMirror` composer and `composer-submit-btn`, writes the bootstrap through
+`ValuePattern`, invokes the submit button through `InvokePattern`, and verifies
+that the submitted text left the composer. It fails closed if the new window or
+either UI element cannot be identified uniquely. `-AutoSubmit` cannot be used
+with `-NoBrowser` and is not supported for non-Chrome fallback browsers.
+
+For GOAL rollover AutoSubmit, the adapter creates a temporary transport payload
+containing the concise bootstrap followed by a verbatim copy of the already
+validated authoritative handoff. The durable handoff file remains the sole
+authority; the transport copy exists only long enough to deliver complete state
+into the fresh browser session and is deleted immediately after the opener
+returns.
