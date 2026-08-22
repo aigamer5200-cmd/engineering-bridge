@@ -8,6 +8,7 @@ import { isId } from "../core/ids.js";
 import type { Id } from "../core/ids.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { RegisteredWorkspaceTaskService, type ExecutorName } from "./registered-workspace-task-service.js";
+import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 
 export type GitStarter = (
   executable: string,
@@ -121,7 +122,12 @@ export class ControlledPatchService {
     this.appliedProposalTaskIds = retainedState.appliedTaskIds;
   }
 
-  async generate(request: { workspace_id: string; change_request: string; executor?: ExecutorName }): Promise<{ taskId: Id; baseHead: string | null }> {
+  async generate(request: {
+    workspace_id: string;
+    change_request: string;
+    executor?: ExecutorName;
+    preflight_receipt?: KnowledgePreflightReceipt;
+  }): Promise<{ taskId: Id; baseHead: string | null }> {
     // Generating a proposal is read-only analysis: any registered workspace
     // may propose; only APPLY requires controlled-write authorization.
     const workspaceRoot = this.registry.resolve(request.workspace_id);
@@ -129,10 +135,16 @@ export class ControlledPatchService {
     return this.startProposal(request.workspace_id, workspaceRoot, base,
       PATCH_INSTRUCTION(request.change_request, base),
       undefined,
-      request.executor);
+      request.executor,
+      request.preflight_receipt);
   }
 
-  async refine(request: { patch_task_id: string; change_request: string; executor?: ExecutorName }): Promise<{ taskId: Id; baseHead: string | null }> {
+  async refine(request: {
+    patch_task_id: string;
+    change_request: string;
+    executor?: ExecutorName;
+    preflight_receipt?: KnowledgePreflightReceipt;
+  }): Promise<{ taskId: Id; baseHead: string | null }> {
     const proposal = this.proposals.get(request.patch_task_id as Id);
     const sourceResult = this.tasks.result(request.patch_task_id);
     if (proposal === undefined || sourceResult === undefined || sourceResult.state !== "completed") {
@@ -144,7 +156,8 @@ export class ControlledPatchService {
     return this.startProposal(proposal.workspaceId, proposal.workspaceRoot, proposal.base,
       REFINEMENT_INSTRUCTION(proposal.base, sourceResult.output, request.change_request),
       request.patch_task_id as Id,
-      request.executor);
+      request.executor,
+      request.preflight_receipt);
   }
 
   async submit(request: { workspace_id: string; base_head: string; diff: string }): Promise<{ taskId: Id; baseHead: string | null }> {
@@ -261,12 +274,14 @@ export class ControlledPatchService {
     base: ProposalBase,
     instruction: string,
     parentTaskId?: Id,
-    executor: ExecutorName = "codex"
+    executor: ExecutorName = "codex",
+    preflightReceipt?: KnowledgePreflightReceipt
   ): { taskId: Id; baseHead: string | null } {
     const { taskId } = this.tasks.runTask({
       workspace_id: workspaceId,
       instruction,
-      executor
+      executor,
+      ...(preflightReceipt === undefined ? {} : { preflight_receipt: preflightReceipt })
     }, normalizeTrailingLf, async (result) => {
       const proposal = this.proposals.get(result.id);
       if (result.state === "failed") {

@@ -16,6 +16,7 @@ import { ControlledPatchService } from "./tasks/controlled-patch-service.js";
 import { ManagedWorkspaceCatalog } from "./workspaces/managed-workspace-catalog.js";
 import { RegisteredWorkspaceRegistry } from "./workspaces/registered-workspace-registry.js";
 import { WorkspaceOnboardingService } from "./workspaces/workspace-onboarding-service.js";
+import { KnowledgePreflightReceiptSchema } from "./tasks/knowledge-preflight-receipt.js";
 
 const WorkspaceEntrySchema = z.object({
   id: z.string().min(1),
@@ -101,14 +102,20 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. This tool does not modify workspace files.",
+    description: "Run a read-only task with the selected executor in a pre-registered workspace. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction without granting extra authority. This tool does not modify workspace files.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
-      executor: z.enum(["codex", "dsh"]).optional().default("codex")
+      executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor }) => {
-    const { taskId } = service.startTask({ workspace_id, instruction, executor });
+  }, ({ workspace_id, instruction, executor, preflight_receipt }) => {
+    const { taskId } = service.startTask({
+      workspace_id,
+      instruction,
+      executor,
+      ...(preflight_receipt === undefined ? {} : { preflight_receipt })
+    });
     return jsonContent({ task_id: taskId });
   });
 
@@ -191,15 +198,21 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("generate_controlled_patch", {
-    description: "Generate a read-only patch proposal for review in any registered Git workspace; generation requires no write authorization, and controlled-write authorization is required only to APPLY.",
+    description: "Generate a read-only patch proposal for review in any registered Git workspace. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction. Generation requires no write authorization, and controlled-write authorization is required only to APPLY.",
     inputSchema: {
       workspace_id: z.string().min(1),
       change_request: z.string().min(1),
-      executor: z.enum(["codex", "dsh"]).optional().default("codex")
+      executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, async ({ workspace_id, change_request, executor }) => {
+  }, async ({ workspace_id, change_request, executor, preflight_receipt }) => {
     try {
-      const proposal = await controlledPatches.generate({ workspace_id, change_request, executor });
+      const proposal = await controlledPatches.generate({
+        workspace_id,
+        change_request,
+        executor,
+        ...(preflight_receipt === undefined ? {} : { preflight_receipt })
+      });
       return jsonContent({ task_id: proposal.taskId, base_head: proposal.baseHead });
     } catch (error) {
       return { isError: true, ...jsonContent({ error: serializeError(error) }) };
@@ -207,15 +220,21 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("refine_controlled_patch", {
-    description: "Refine a completed retained patch proposal into a new complete read-only proposal against the same base HEAD.",
+    description: "Refine a completed retained patch proposal into a new complete read-only proposal against the same base HEAD. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction for this new delegation.",
     inputSchema: {
       patch_task_id: z.string().min(1),
       change_request: z.string().min(1),
-      executor: z.enum(["codex", "dsh"]).optional().default("codex")
+      executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, async ({ patch_task_id, change_request, executor }) => {
+  }, async ({ patch_task_id, change_request, executor, preflight_receipt }) => {
     try {
-      const proposal = await controlledPatches.refine({ patch_task_id, change_request, executor });
+      const proposal = await controlledPatches.refine({
+        patch_task_id,
+        change_request,
+        executor,
+        ...(preflight_receipt === undefined ? {} : { preflight_receipt })
+      });
       return jsonContent({ task_id: proposal.taskId, base_head: proposal.baseHead });
     } catch (error) {
       return { isError: true, ...jsonContent({ error: serializeError(error) }) };

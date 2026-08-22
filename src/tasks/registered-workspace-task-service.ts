@@ -5,6 +5,8 @@ import type { SerializedError } from "../core/errors.js";
 import { CoreError } from "../core/errors.js";
 import type { Executor, ExecutorEvidence } from "../executors/executor.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
+import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
+import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 
 export type ExecutorName = "codex" | "dsh";
 
@@ -12,6 +14,7 @@ export interface RegisteredWorkspaceTaskRequest {
   readonly workspace_id: string;
   readonly instruction: string;
   readonly executor?: ExecutorName;
+  readonly preflight_receipt?: KnowledgePreflightReceipt;
 }
 
 type NormalizedRegisteredWorkspaceTaskRequest = RegisteredWorkspaceTaskRequest & { readonly executor: ExecutorName };
@@ -290,7 +293,12 @@ export class RegisteredWorkspaceTaskService {
       const registration = this.registry.resolveExecution(record.request.workspace_id);
       const executor = this.executorFactory(record.request.executor, registration.root);
       record.executor = executor;
-      const result = await executor.execute({ taskId, instruction: record.request.instruction,
+      const instruction = attachKnowledgePreflightReceipt(record.request.instruction, record.request.preflight_receipt, {
+        workspaceId: record.request.workspace_id,
+        workspaceRoot: registration.root,
+        executor: record.request.executor
+      });
+      const result = await executor.execute({ taskId, instruction,
         sandbox: "read-only", threadId: record.threadId,
         onEvidence: (items) => { record.evidence = items; } });
       record.executor = undefined;
@@ -329,7 +337,12 @@ export class RegisteredWorkspaceTaskService {
       // control_task can reach the existing interrupt/steer seam; the terminal
       // record below replaces it once the run settles.
       this.tasks.set(taskId, { state: "running", executor: request.executor, active: executor });
-      const result = await executor.execute({ taskId, instruction: request.instruction });
+      const instruction = attachKnowledgePreflightReceipt(request.instruction, request.preflight_receipt, {
+        workspaceId: request.workspace_id,
+        workspaceRoot,
+        executor: request.executor
+      });
+      const result = await executor.execute({ taskId, instruction });
       const taskResult: RegisteredWorkspaceTaskResult = result.kind === "completed"
         ? {
           id: taskId,

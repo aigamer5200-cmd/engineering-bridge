@@ -10,9 +10,21 @@ import type { Id } from "../../../src/core/ids.js";
 import type { Executor, ExecutorRequest, ExecutorResult } from "../../../src/executors/executor.js";
 import { DshExecutor } from "../../../src/executors/dsh-executor.js";
 import { RegisteredWorkspaceTaskService } from "../../../src/tasks/registered-workspace-task-service.js";
+import type { KnowledgePreflightReceipt } from "../../../src/tasks/knowledge-preflight-receipt.js";
 import { RegisteredWorkspaceRegistry } from "../../../src/workspaces/registered-workspace-registry.js";
 
 const ROOT = "/registered/root";
+
+const PREFLIGHT_RECEIPT: KnowledgePreflightReceipt = {
+  knowledge_base_path: "D:/AI_Knowledge_Base",
+  knowledge_base_head: "670414561cb44acfd79bc1d5e858ee814a09a240",
+  project_profile: "wiki/projects/biaogu-hunter/PROJECT_PROFILE.md",
+  goal_id: "bridge-preflight-v1",
+  goal_summary: "Carry current bounded knowledge into the delegated task.",
+  acceptance_criteria: ["Preserve task scope."],
+  relevant_topics: ["wiki/global/KNOWLEDGE_PREFLIGHT_PROTOCOL.md"],
+  critical_boundaries: ["Read-only execution remains read-only."]
+};
 
 function registry(): RegisteredWorkspaceRegistry {
   return new RegisteredWorkspaceRegistry([{ id: "known", root: ROOT }]);
@@ -513,6 +525,39 @@ test("continue preserves the same native Codex thread id and passes it to the re
 
   assert.deepEqual(requests.map(({ threadId }) => threadId), [undefined, "thread-1"]);
   assert.equal(service.taskView(taskId)?.threadId, "thread-1");
+});
+
+test("knowledge preflight receipt is injected on every turn and survives continue", async () => {
+  const requests: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      requests.push(request);
+      return { kind: "completed", output: "done", threadId: "thread-1" };
+    }
+  };
+  const platformRoot = process.cwd();
+  const platformRegistry = new RegisteredWorkspaceRegistry([{ id: "known", root: platformRoot }]);
+  const service = new RegisteredWorkspaceTaskService(platformRegistry, () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "first bounded task",
+    preflight_receipt: PREFLIGHT_RECEIPT
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  await service.controlTask(taskId, "continue", "second bounded task");
+  await waitForInteractiveReady(service, taskId);
+
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.match(request.instruction, /knowledge_base_head: 670414561cb44acfd79bc1d5e858ee814a09a240/u);
+    assert.equal(request.instruction.includes(`workspace_root: ${platformRoot}`), true);
+    assert.match(request.instruction, /sandbox: read-only/u);
+  }
+  assert.equal(requests[0]?.instruction.endsWith("Task instruction:\nfirst bounded task"), true);
+  assert.equal(requests[1]?.instruction.endsWith("Task instruction:\nsecond bounded task"), true);
+  assert.equal(requests[1]?.instruction.includes("Task instruction:\nfirst bounded task"), false);
+  assert.deepEqual(requests.map(({ threadId }) => threadId), [undefined, "thread-1"]);
 });
 
 test("DSH taskView reports executor dsh without fabricating a thread id, across continue", async () => {

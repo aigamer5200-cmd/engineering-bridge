@@ -71,6 +71,17 @@ index 90be1f3..3b18e51 100644
 +after
 `;
 
+const preflightReceipt = {
+  knowledge_base_path: "D:/AI_Knowledge_Base",
+  knowledge_base_head: "670414561cb44acfd79bc1d5e858ee814a09a240",
+  project_profile: "wiki/projects/biaogu-hunter/PROJECT_PROFILE.md",
+  goal_id: "bridge-preflight-v1",
+  goal_summary: "Carry bounded current knowledge into a patch delegation.",
+  acceptance_criteria: ["Return a complete controlled patch."],
+  relevant_topics: ["wiki/global/KNOWLEDGE_PREFLIGHT_PROTOCOL.md"],
+  critical_boundaries: ["Patch generation remains read-only."]
+};
+
 const additionPatch = `diff --git a/added.txt b/added.txt
 new file mode 100644
 index 0000000..3e75765
@@ -484,6 +495,40 @@ test("stores and applies a controlled patch normalized to one trailing LF", asyn
   });
   await controlled.apply({ patch_task_id: generated.taskId, confirmation: "APPLY" });
   assert.equal(readFileSync(join(root, "note.txt"), "utf8"), "after\n");
+});
+
+test("generation and refinement carry an explicit knowledge preflight receipt without changing patch authority", async () => {
+  const root = repository();
+  const instructions: string[] = [];
+  const { controlled, tasks } = fixture(root, async (request) => {
+    instructions.push(request.instruction);
+    return { kind: "completed", output: validPatch };
+  });
+
+  const generated = await controlled.generate({
+    workspace_id: "workspace",
+    change_request: "change note",
+    preflight_receipt: preflightReceipt
+  });
+  await terminal(tasks, generated.taskId);
+
+  const refined = await controlled.refine({
+    patch_task_id: generated.taskId,
+    change_request: "keep the same change",
+    preflight_receipt: preflightReceipt
+  });
+  await terminal(tasks, refined.taskId);
+
+  assert.equal(instructions.length, 2);
+  for (const instruction of instructions) {
+    assert.match(instruction, /Knowledge Preflight Receipt/u);
+    assert.match(instruction, /knowledge_base_head: 670414561cb44acfd79bc1d5e858ee814a09a240/u);
+    assert.match(instruction, /workspace_root:/u);
+    assert.match(instruction, /sandbox: read-only/u);
+    assert.match(instruction, /does not grant write, release, credential, or scope-expansion authority/u);
+    assert.match(instruction, /Return only a unified textual Git diff/u);
+  }
+  assert.equal(readFileSync(join(root, "note.txt"), "utf8"), "before\n");
 });
 
 test("applies a valid patch when Markdown context contains fenced code", async () => {

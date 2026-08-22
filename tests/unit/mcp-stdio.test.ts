@@ -53,6 +53,12 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
       "task_result"
     ]);
 
+    for (const toolName of ["run_task", "generate_controlled_patch", "refine_controlled_patch"]) {
+      const tool = listed.tools.find(({ name }) => name === toolName);
+      const inputSchema = tool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+      assert.equal(typeof inputSchema?.properties?.preflight_receipt, "object");
+    }
+
     const result = await client.callTool({
       name: "generate_controlled_patch",
       arguments: { workspace_id: "missing", change_request: "change nothing" }
@@ -90,7 +96,21 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     for (const argumentsValue of [
       { workspace_id: "missing", instruction: "inspect" },
       { workspace_id: "missing", instruction: "inspect", executor: "codex" },
-      { workspace_id: "missing", instruction: "inspect", executor: "dsh" }
+      { workspace_id: "missing", instruction: "inspect", executor: "dsh" },
+      {
+        workspace_id: "missing",
+        instruction: "inspect",
+        preflight_receipt: {
+          knowledge_base_path: "D:/AI_Knowledge_Base",
+          knowledge_base_head: "670414561cb44acfd79bc1d5e858ee814a09a240",
+          project_profile: "wiki/projects/biaogu-hunter/PROJECT_PROFILE.md",
+          goal_id: "bridge-preflight-v1",
+          goal_summary: "Carry bounded current knowledge into delegated work.",
+          acceptance_criteria: ["Preserve task scope."],
+          relevant_topics: ["wiki/global/KNOWLEDGE_PREFLIGHT_PROTOCOL.md"],
+          critical_boundaries: ["No extra authority."]
+        }
+      }
     ]) {
       const runResult = await client.callTool({
         name: "run_task",
@@ -118,6 +138,25 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     });
     assert.equal(unknownExecutor.isError, true);
     assert.equal(JSON.stringify(unknownExecutor).includes("task_id"), false);
+
+    const malformedReceipt = await client.callTool({
+      name: "run_task",
+      arguments: {
+        workspace_id: "missing",
+        instruction: "inspect",
+        preflight_receipt: {
+          knowledge_base_path: "D:/AI_Knowledge_Base",
+          knowledge_base_head: "main",
+          project_profile: "wiki/projects/biaogu-hunter/PROJECT_PROFILE.md",
+          goal_summary: "invalid receipt",
+          acceptance_criteria: ["one"],
+          relevant_topics: ["topic"],
+          critical_boundaries: ["boundary"]
+        }
+      }
+    });
+    assert.equal(malformedReceipt.isError, true);
+    assert.equal(JSON.stringify(malformedReceipt).includes("task_id"), false);
   } finally {
     await client.close();
   }

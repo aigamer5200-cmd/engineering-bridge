@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Bounded Knowledge Preflight Receipt
+
+- `run_task`, `generate_controlled_patch`, and `refine_controlled_patch` now accept an optional structured `preflight_receipt` carrying the orchestrator's bounded current context: Knowledge Base path/HEAD, project profile, GOAL summary, acceptance criteria, relevant topics, and critical boundaries.
+- Bridge appends the actual registered `workspace_id`, registered workspace root, selected executor, and `sandbox: read-only` to the executor-facing receipt. Callers do not provide or override that execution boundary.
+- The receipt is context only. It never grants write, release, credential, network, or scope-expansion authority; existing controlled-`APPLY` and executor sandbox rules remain unchanged.
+- Interactive `continue` keeps the current task receipt while replacing only the turn instruction. A new generate/refine delegation receives only the receipt explicitly supplied for that call, so old proposal context is not silently inherited.
+- Omitting `preflight_receipt` preserves the legacy executor instruction byte-for-byte.
+
 Controlled-patch proposals can now be generated and refined by either executor, while application remains a deterministic, model-free step.
 
 - `generate_controlled_patch` and `refine_controlled_patch` accept an optional `executor: "codex" | "dsh"`, selected per call and defaulting to `codex` when omitted; refinement never inherits the source proposal's executor.

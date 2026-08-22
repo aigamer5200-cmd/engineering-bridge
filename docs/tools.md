@@ -1,10 +1,27 @@
 # MCP tool reference
 
-This is the tool surface of Engineering Bridge V1 (1.2.0). The local STDIO MCP server exposes nine tools.
+This is the tool surface of Engineering Bridge V1. The local STDIO MCP server exposes ten tools.
+
+## Knowledge Preflight Receipt
+
+`run_task`, `generate_controlled_patch`, and `refine_controlled_patch` accept an optional `preflight_receipt` object with these bounded fields:
+
+- `knowledge_base_path`
+- `knowledge_base_head` (7-64 lowercase hexadecimal characters)
+- `project_profile`
+- optional `goal_id`
+- `goal_summary`
+- `acceptance_criteria`
+- `relevant_topics`
+- `critical_boundaries`
+
+The three list fields require 1-32 single-line values. Other receipt strings are also single-line and bounded. Bridge prepends this receipt to the selected executor's instruction and adds the actual registered `workspace_id`, registered workspace root, selected executor, and `sandbox: read-only` execution boundary.
+
+The receipt is delegation context, not an authority grant. It does not enable writes, credentials, network, release, or scope expansion. Bridge does not read or adjudicate the external Knowledge Base; the orchestrator remains responsible for preflight and current-rule selection. Omitting the receipt preserves the legacy executor instruction unchanged.
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`).
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `preflight_receipt`.
 
 Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 
@@ -27,7 +44,7 @@ Inputs: `task_id`, `action`, and optional `instruction`.
 
 The actions are state-specific:
 
-- `continue`: while `waiting_for_supervisor_review`, requires a non-empty instruction, queues another read-only turn, and preserves app-server thread continuity with `thread/resume` for Codex. For DSH, `continue` starts a new headless execution; there is no native resume.
+- `continue`: while `waiting_for_supervisor_review`, requires a non-empty instruction, queues another read-only turn, and preserves app-server thread continuity with `thread/resume` for Codex. For DSH, `continue` starts a new headless execution; there is no native resume. If the task was started with a Knowledge Preflight Receipt, the same receipt is prepended to the continued turn while only the task instruction is replaced.
 - `steer`: while `running`, requires a non-empty instruction and steers the active turn (Codex only).
 - `interrupt`: while `running`, interrupts the active turn. When interruption completes, the task ends as `failed`; genuine partial output may be exposed as `partial_output`.
 - `accept`: while `waiting_for_supervisor_review`, marks the reviewed output `completed` without starting another turn.
@@ -54,15 +71,21 @@ Grants persistent controlled-write permission to one managed workspace only; man
 
 ## `generate_controlled_patch`
 
-Inputs: `workspace_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`).
+Inputs: `workspace_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `preflight_receipt`.
 
 Read-only proposal flow available in any registered workspace; no write authorization is required to generate. It verifies that the configured root resolves to the Git top-level and that tracked state and the index are clean (with an existing HEAD, or unborn-repository support for added-file proposals), records and returns `base_head`, and starts a separate read-only proposal task that does not modify files. The proposal and its applied history persist to `<config>.controlled-patches.json`.
 
 ## `refine_controlled_patch`
 
-Inputs: `patch_task_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`).
+Inputs: `patch_task_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `preflight_receipt`.
 
-Read-only refinement of a completed controlled-patch proposal: returns a new complete proposal against the same `base_head`, preserving the source proposal. The executor is selected per call and defaults to `codex`; it is not inherited from the parent proposal. Requires the source task to be `completed` and the workspace base to be unchanged. No write authorization is required; it never modifies files.
+Read-only refinement of a completed controlled-patch proposal: returns a new complete proposal against the same `base_head`, preserving the source proposal. The executor is selected per call and defaults to `codex`; it is not inherited from the parent proposal. The Knowledge Preflight Receipt is also selected per call and is not silently inherited from the parent proposal. Requires the source task to be `completed` and the workspace base to be unchanged. No write authorization is required; it never modifies files.
+
+## `submit_controlled_patch`
+
+Inputs: `workspace_id`, `base_head`, `diff`.
+
+Registers a caller-provided complete unified text diff as a retained read-only proposal against exactly the current commit HEAD. No executor runs, so task reporting uses `source: "submitted"` and never fabricates an executor identity. The submitted diff must pass the same controlled-patch structural and workspace preflight used by APPLY. It does not modify files until a later exact `APPLY` call, and it does not accept a Knowledge Preflight Receipt because there is no executor delegation.
 
 ## `apply_controlled_patch`
 
