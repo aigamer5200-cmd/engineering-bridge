@@ -61,9 +61,13 @@ shared ChatGPT opener snapshots existing Chrome top-level windows, requires one
 new ChatGPT window from the current launch, uniquely locates its Chromium UIA
 `ProseMirror` composer and `composer-submit-btn`, writes the bootstrap through
 `ValuePattern`, invokes the submit button through `InvokePattern`, and verifies
-that the submitted text left the composer. It fails closed if the new window or
-either UI element cannot be identified uniquely. `-AutoSubmit` cannot be used
-with `-NoBrowser` and is not supported for non-Chrome fallback browsers.
+that the submitted text left the composer. A project conversation commonly
+clears the composer after submit, while the ordinary ChatGPT new-chat surface
+may keep the same UIA element and replace its value with short default text;
+both are accepted only when the original submitted payload no longer remains.
+It fails closed if the new window or either UI element cannot be identified
+uniquely. `-AutoSubmit` cannot be used with `-NoBrowser` and is not supported
+for non-Chrome fallback browsers.
 
 For GOAL rollover AutoSubmit, the adapter creates a temporary transport payload
 containing the concise bootstrap followed by a verbatim copy of the already

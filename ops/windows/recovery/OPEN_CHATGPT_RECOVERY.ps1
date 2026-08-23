@@ -165,6 +165,10 @@ public static class ChatGptWindowNative {
         }
         $valuePattern = [System.Windows.Automation.ValuePattern]$valuePatternObject
         $valuePattern.SetValue($autoSubmitText)
+        $submittedComposerValue = $valuePattern.Current.Value
+        if ([string]::IsNullOrWhiteSpace($submittedComposerValue)) {
+            throw "AutoSubmit composer did not retain the submitted payload before send"
+        }
 
         $submitButton = $null
         $buttonDeadline = (Get-Date).AddSeconds([Math]::Min(10, $AutoSubmitTimeoutSeconds))
@@ -216,7 +220,11 @@ public static class ChatGptWindowNative {
         while ((Get-Date) -lt $verifyDeadline) {
             Start-Sleep -Milliseconds 100
             try {
-                if ([string]::IsNullOrWhiteSpace($valuePattern.Current.Value)) {
+                $currentComposerValue = $valuePattern.Current.Value
+                if (
+                    [string]::IsNullOrWhiteSpace($currentComposerValue) -or
+                    ($currentComposerValue -ne $submittedComposerValue)
+                ) {
                     $verified = $true
                     break
                 }
@@ -228,7 +236,7 @@ public static class ChatGptWindowNative {
             }
         }
         if (-not $verified) {
-            throw "AutoSubmit could not verify that the bootstrap left the composer"
+            throw "AutoSubmit could not verify that the submitted payload left the composer"
         }
 
         Write-Host "ChatGPT bootstrap auto-submitted."
