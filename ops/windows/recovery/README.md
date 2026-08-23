@@ -46,6 +46,16 @@ arguments. Recovery keeps using its original defaults, while preventive GOAL
 rollover may reuse the same opener without copying its generated bootstrap into
 the Engineering Recovery runtime directory.
 
+All live ChatGPT window opens now share a durable cooldown at
+`runtime\chatgpt-window-cooldown.json`. The default is 180 seconds, so GOAL
+rollover, Engineering Recovery, and notification/control-center windows cannot
+automatically open more than one new ChatGPT window within three minutes. The
+timestamp is recorded before Chrome is launched, which also throttles immediate
+retry storms when a later UIA/submit step fails. `-NoBrowser` validation does
+not consume the cooldown. Callers may supply a different `-CooldownStateFile`
+for isolated tests; production uses the shared default so separate workflows
+still respect the same rate-limit guard.
+
 `OPEN_GOAL_ROLLOVER.ps1 -ControlRoot <path>` is the preventive-rollover adapter.
 It fail-closes unless `CURRENT_HANDOFF`, the referenced handoff, and
 `NEXT_WINDOW_BOOTSTRAP.txt` all exist under the supplied control root. It then

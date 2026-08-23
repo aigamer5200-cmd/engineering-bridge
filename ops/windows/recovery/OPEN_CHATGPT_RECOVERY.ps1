@@ -3,7 +3,9 @@ param(
     [string]$UrlFile = "",
     [switch]$NoBrowser,
     [switch]$AutoSubmit,
-    [int]$AutoSubmitTimeoutSeconds = 25
+    [int]$AutoSubmitTimeoutSeconds = 25,
+    [int]$WindowCooldownSeconds = 180,
+    [string]$CooldownStateFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +13,7 @@ $ErrorActionPreference = "Stop"
 $RuntimeRoot = "D:\Engineering_Bridge_System\runtime"
 $DefaultUrlFile = Join-Path $RuntimeRoot "chatgpt-recovery-url.txt"
 $DefaultClipboardFile = Join-Path $RuntimeRoot "recovery-handoff.txt"
+$DefaultCooldownStateFile = Join-Path $RuntimeRoot "chatgpt-window-cooldown.json"
 $DefaultUrl = "https://chatgpt.com/"
 
 if (-not $UrlFile) {
@@ -19,9 +22,15 @@ if (-not $UrlFile) {
 if (-not $ClipboardFile) {
     $ClipboardFile = $DefaultClipboardFile
 }
+if (-not $CooldownStateFile) {
+    $CooldownStateFile = $DefaultCooldownStateFile
+}
 
 if ($AutoSubmitTimeoutSeconds -lt 5 -or $AutoSubmitTimeoutSeconds -gt 120) {
     throw "AutoSubmitTimeoutSeconds must be between 5 and 120"
+}
+if ($WindowCooldownSeconds -lt 0 -or $WindowCooldownSeconds -gt 3600) {
+    throw "WindowCooldownSeconds must be between 0 and 3600"
 }
 
 if ($AutoSubmit -and $NoBrowser) {
@@ -57,6 +66,57 @@ if ($AutoSubmit) {
 
 if ($NoBrowser) {
     exit 0
+}
+
+$cooldownStatePath = [System.IO.Path]::GetFullPath($CooldownStateFile)
+$cooldownDirectory = Split-Path -Parent $cooldownStatePath
+if (-not (Test-Path -LiteralPath $cooldownDirectory)) {
+    New-Item -ItemType Directory -Path $cooldownDirectory -Force | Out-Null
+}
+$cooldownLockPath = "$cooldownStatePath.lock"
+$cooldownLock = $null
+try {
+    $cooldownLock = [System.IO.File]::Open(
+        $cooldownLockPath,
+        [System.IO.FileMode]::OpenOrCreate,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+    )
+
+    $nowUtc = [DateTimeOffset]::UtcNow
+    $lastAttemptUtc = $null
+    if (Test-Path -LiteralPath $cooldownStatePath) {
+        try {
+            $cooldownState = Get-Content -LiteralPath $cooldownStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($cooldownState.last_attempt_utc) {
+                $lastAttemptUtc = [DateTimeOffset]::Parse([string]$cooldownState.last_attempt_utc)
+            }
+        } catch {
+            throw "ChatGPT window cooldown state is invalid: $cooldownStatePath"
+        }
+    }
+
+    if ($WindowCooldownSeconds -gt 0 -and $null -ne $lastAttemptUtc) {
+        $elapsedSeconds = [Math]::Floor(($nowUtc - $lastAttemptUtc).TotalSeconds)
+        if ($elapsedSeconds -lt $WindowCooldownSeconds) {
+            $retryAfter = [int][Math]::Ceiling($WindowCooldownSeconds - $elapsedSeconds)
+            throw "CHATGPT_WINDOW_COOLDOWN_ACTIVE retry_after_seconds=$retryAfter state=$cooldownStatePath"
+        }
+    }
+
+    $cooldownPayload = [ordered]@{
+        schema_version = 1
+        last_attempt_utc = $nowUtc.ToString("o")
+        cooldown_seconds = $WindowCooldownSeconds
+        process_id = $PID
+    } | ConvertTo-Json
+    $cooldownTemp = "$cooldownStatePath.tmp.$PID"
+    Set-Content -LiteralPath $cooldownTemp -Value $cooldownPayload -Encoding UTF8
+    Move-Item -LiteralPath $cooldownTemp -Destination $cooldownStatePath -Force
+} finally {
+    if ($null -ne $cooldownLock) {
+        $cooldownLock.Dispose()
+    }
 }
 
 $chromeCandidates = @(
