@@ -175,6 +175,8 @@ Recovery instruction for the new ChatGPT window:
 Continue the latest frozen /GOAL and checkpoint in the current project. Do not re-plan already-settled architecture. First recover/verify the authoritative Shoestring GOAL runtime state for the current worktree, then verify DevSpace and Engineering Bridge availability. Treat the previous Bridge task/thread as stale after recovery: do not continue an old task_id; start a fresh run_task so Codex gets a new native thread/session, then resume from the latest accepted checkpoint. If the current project already contains a handoff or frozen GOAL, use that as the authority.
 
 Mandatory TG stop rule: unless the Owner explicitly asks to pause, stop, not continue, or abort, any reason that causes forward execution to stop must proactively notify the Owner through Telegram before yielding or waiting. This includes tool/runtime/Bridge/DS/Codex failures, no-safe-path conditions, unresolved material ambiguity, authorization boundaries, and owner-only decision waits. For a recoverable interruption, use the shared Shoestring GOAL interruption path, notify first, then recover and continue automatically when safe. An explicit Owner-requested pause/stop is exempt from this interruption notification.
+
+Checkpoint TG distinction: an intermediate C/P is routine recovery state and must continue silently when frozen-GOAL work remains. A final verified C/P is different when the only next step is the Owner deciding whether to authorize I/W: notify the Owner through Telegram after that final C/P is durable, then stop and wait for the explicit I/W decision.
 "@
 
     Set-Content -LiteralPath $HandoffFile -Value $text -Encoding UTF8

@@ -14,4 +14,8 @@ test("recovery handoff freezes the reason-agnostic GOAL Telegram stop rule", () 
   assert.match(watchdog, /owner-only decision waits/u);
   assert.match(watchdog, /notify first, then recover and continue automatically when safe/u);
   assert.match(watchdog, /explicit Owner-requested pause\/stop is exempt/u);
+  assert.match(watchdog, /an intermediate C\/P is routine recovery state/u);
+  assert.match(watchdog, /A final verified C\/P is different/u);
+  assert.match(watchdog, /Owner deciding whether to authorize I\/W/u);
+  assert.match(watchdog, /after that final C\/P is durable/u);
 });
