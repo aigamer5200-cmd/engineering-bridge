@@ -172,7 +172,11 @@ After:
 - Engineering Bridge: healthy=$($After.Bridge.Healthy), reason=$($After.Bridge.Reason)
 
 Recovery instruction for the new ChatGPT window:
-Continue the latest frozen /GOAL and checkpoint in the current project. Do not re-plan already-settled architecture. First verify DevSpace and Engineering Bridge availability. Treat the previous Bridge task/thread as stale after recovery: do not continue an old task_id; start a fresh run_task so Codex gets a new native thread/session, then resume from the latest accepted checkpoint. If the current project already contains a handoff or frozen GOAL, use that as the authority.
+Continue the latest frozen /GOAL and checkpoint in the current project. Do not re-plan already-settled architecture. First recover/verify the authoritative Shoestring GOAL runtime state for the current worktree, then verify DevSpace and Engineering Bridge availability. Treat the previous Bridge task/thread as stale after recovery: do not continue an old task_id; start a fresh run_task so Codex gets a new native thread/session, then resume from the latest accepted checkpoint. If the current project already contains a handoff or frozen GOAL, use that as the authority.
+
+Mandatory TG stop rule: unless the Owner explicitly asks to pause, stop, not continue, or abort, any reason that causes forward execution to stop must proactively notify the Owner through Telegram before yielding or waiting. This includes tool/runtime/Bridge/DS/Codex failures, no-safe-path conditions, unresolved material ambiguity, authorization boundaries, and owner-only decision waits. For a recoverable interruption, use the shared Shoestring GOAL interruption path, notify first, then recover and continue automatically when safe. An explicit Owner-requested pause/stop is exempt from this interruption notification.
+
+核心規則：除非 Owner 明確要求暫停或停止，否則任何原因造成執行流程停下來，都必須先主動用 TG 通知 Owner。
 "@
 
     Set-Content -LiteralPath $HandoffFile -Value $text -Encoding UTF8

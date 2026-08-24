@@ -14,6 +14,7 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 - Recovery waits only for the immediate control BAT wrapper to return. It deliberately does **not** use PowerShell `Start-Process -Wait`, because that can wait for the long-running DevSpace `node.exe` descendant and deadlock the watchdog after a successful restart.
 - Successful automatic service recovery writes `runtime\recovery-handoff.txt` and `runtime\recovery-state.json`, then opens a fresh ChatGPT browser window and copies the handoff text to the clipboard.
 - A recovered Bridge task/thread is considered stale. The next ChatGPT window must start a fresh `run_task`; that creates a new native Codex thread instead of resuming an old Bridge task id.
+- The recovery handoff also carries the current Shoestring GOAL stop-notification invariant: unless the Owner explicitly requested pause/stop/not-continue/abort, **any reason that makes forward execution stop must notify the Owner through Telegram before the recovered workflow yields or waits**. Recoverable stops notify first and then continue recovery; owner-only decision/authorization waits also notify before waiting. An Owner-requested pause/stop remains the only exemption from the interruption notification caused by that stop.
 
 ## Live fault validation
 
