@@ -20,7 +20,12 @@ test("recovery handoff freezes the reason-agnostic GOAL Telegram stop rule", () 
   assert.match(watchdog, /after that final C\/P is durable/u);
   assert.match(watchdog, /standalone global npm Codex provider first/u);
   assert.match(watchdog, /VS Code bundled codex\.exe fallback/u);
-  assert.match(watchdog, /switch the Shoestring GOAL executor mode to web-gpt-ds/u);
-  assert.match(watchdog, /continue the same frozen GOAL with Web GPT \+ DS/u);
-  assert.match(watchdog, /Do not stop merely because Codex is unavailable/u);
+  assert.match(watchdog, /every formal bounded Codex task must enter through Engineering Bridge/u);
+  assert.match(watchdog, /Do not use DS exec_command/u);
+  assert.match(watchdog, /task-local recoverable failure/u);
+  assert.match(watchdog, /keep executor_mode=codex/u);
+  assert.match(watchdog, /requires DS apply_patch for writes/u);
+  assert.match(watchdog, /Only actual exhaustion of both providers/u);
+  assert.match(watchdog, /codex-failure transition/u);
+  assert.match(watchdog, /single task-local stall must never advance the provider chain/u);
 });

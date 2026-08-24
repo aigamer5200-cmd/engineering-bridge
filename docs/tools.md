@@ -27,6 +27,22 @@ Starts a supervised task with the selected executor and returns `task_id`. `run_
 
 ## `task_result`
 
+For a successful Codex task, `task_result` may include a Bridge-authored durable
+`execution_receipt` containing the exact registered `workspace_id`,
+`workspace_root`, `task_id`, executor=`codex`, Bridge operation,
+`read_only: true`, receipt state (`waiting_for_supervisor_review` or
+`completed`), and `recorded_at`. The receipt is persisted separately in
+`<config>.execution-receipts.json`, is bounded to the newest 500 valid records,
+contains no prompt/output text, and grants no write/release/acceptance
+authority. Shoestring GOAL uses this Bridge-authored record to reject caller
+self-attestation when closing a formal Codex Execution phase.
+
+If a reviewed Codex `run_task` is continued, the prior ready receipt is removed
+before the next turn starts. `task_result` exposes a receipt only when the
+current task state matches that receipt (`waiting_for_supervisor_review` or
+`completed`), so a running/failed continuation cannot surface stale evidence.
+DSH executions intentionally produce no Codex execution receipt.
+
 Input: `task_id`.
 
 Returns the task state, readiness, fixed `executor`, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
@@ -11,6 +13,7 @@ import type { Id } from "../../../src/core/ids.js";
 import type { Executor, ExecutorRequest, ExecutorResult } from "../../../src/executors/executor.js";
 import { DshExecutor } from "../../../src/executors/dsh-executor.js";
 import { RegisteredWorkspaceTaskService } from "../../../src/tasks/registered-workspace-task-service.js";
+import { ExecutionReceiptStore } from "../../../src/tasks/execution-receipt-store.js";
 import type { KnowledgePreflightReceipt } from "../../../src/tasks/knowledge-preflight-receipt.js";
 import { RegisteredWorkspaceRegistry } from "../../../src/workspaces/registered-workspace-registry.js";
 
@@ -91,6 +94,118 @@ async function waitForInteractiveReady(service: RegisteredWorkspaceTaskService, 
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
+
+test("Bridge persists read-only Codex execution provenance for interactive run_task", async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipt-")), "receipts.json");
+  const receipts = new ExecutionReceiptStore(statePath);
+  await receipts.load();
+  const executor: Executor = {
+    execute: async () => ({ kind: "completed", output: "review me", threadId: "thread-1" })
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor, receipts);
+
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect", executor: "codex" });
+  await waitForInteractiveReady(service, taskId);
+
+  const ready = receipts.get(taskId);
+  assert.equal(ready?.workspaceId, "known");
+  assert.equal(ready?.workspaceRoot, ROOT);
+  assert.equal(ready?.operation, "run_task");
+  assert.equal(ready?.executor, "codex");
+  assert.equal(ready?.readOnly, true);
+  assert.equal(ready?.state, "waiting_for_supervisor_review");
+
+  await service.controlTask(taskId, "accept");
+  assert.equal(receipts.get(taskId)?.state, "completed");
+
+  const restored = new ExecutionReceiptStore(statePath);
+  await restored.load();
+  assert.equal(restored.get(taskId)?.state, "completed");
+  assert.equal(restored.get(taskId)?.workspaceRoot, ROOT);
+});
+
+test("legacy controlled-patch task persists generate/refine receipts while DSH persists none", async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipt-")), "receipts.json");
+  const receipts = new ExecutionReceiptStore(statePath);
+  const executor: Executor = { execute: async () => ({ kind: "completed", output: "diff" }) };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor, receipts);
+
+  const generated = service.runTask(
+    { workspace_id: "known", instruction: "generate", executor: "codex" },
+    undefined,
+    undefined,
+    "generate_controlled_patch"
+  );
+  const refined = service.runTask(
+    { workspace_id: "known", instruction: "refine", executor: "codex" },
+    undefined,
+    undefined,
+    "refine_controlled_patch"
+  );
+  const dsh = service.runTask(
+    { workspace_id: "known", instruction: "generate", executor: "dsh" },
+    undefined,
+    undefined,
+    "generate_controlled_patch"
+  );
+  await waitForTerminal(service, generated.taskId);
+  await waitForTerminal(service, refined.taskId);
+  await waitForTerminal(service, dsh.taskId);
+
+  assert.equal(receipts.get(generated.taskId)?.operation, "generate_controlled_patch");
+  assert.equal(receipts.get(generated.taskId)?.state, "completed");
+  assert.equal(receipts.get(refined.taskId)?.operation, "refine_controlled_patch");
+  assert.equal(receipts.get(refined.taskId)?.state, "completed");
+  assert.equal(receipts.get(dsh.taskId), undefined);
+});
+
+test("interactive continue removes stale ready receipt until the new Codex turn is ready", async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipt-continue-")), "receipts.json");
+  const receipts = new ExecutionReceiptStore(statePath);
+  const second = deferred<ExecutorResult>();
+  let calls = 0;
+  const executor: Executor = {
+    execute: async () => {
+      calls += 1;
+      if (calls === 1) return { kind: "completed", output: "first", threadId: "thread-1" };
+      return second.promise;
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor, receipts);
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "first", executor: "codex" });
+  await waitForInteractiveReady(service, taskId);
+  assert.equal(receipts.get(taskId)?.state, "waiting_for_supervisor_review");
+
+  await service.controlTask(taskId, "continue", "second");
+  assert.equal(receipts.get(taskId), undefined);
+  await Promise.resolve();
+  assert.equal(service.taskView(taskId)?.state, "running");
+
+  second.resolve({ kind: "completed", output: "second", threadId: "thread-1" });
+  await waitForInteractiveReady(service, taskId);
+  assert.equal(receipts.get(taskId)?.state, "waiting_for_supervisor_review");
+});
+
+test("accept keeps task waiting when completed receipt persistence fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "engineering-bridge-receipt-accept-fail-"));
+  const statePath = join(root, "receipts.json");
+  const receipts = new ExecutionReceiptStore(statePath);
+  const executor: Executor = {
+    execute: async () => ({ kind: "completed", output: "review me", threadId: "thread-1" })
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor, receipts);
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect", executor: "codex" });
+  await waitForInteractiveReady(service, taskId);
+  assert.equal(service.taskView(taskId)?.state, "waiting_for_supervisor_review");
+  assert.equal(receipts.get(taskId)?.state, "waiting_for_supervisor_review");
+
+  rmSync(statePath);
+  mkdirSync(statePath);
+  await assert.rejects(service.controlTask(taskId, "accept"));
+
+  assert.equal(service.taskView(taskId)?.state, "waiting_for_supervisor_review");
+  assert.equal(receipts.get(taskId)?.state, "waiting_for_supervisor_review");
+});
 
 test("returns immediately and exposes queued/running without a result", async () => {
   const pending = deferred<ExecutorResult>();

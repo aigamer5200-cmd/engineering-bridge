@@ -1,5 +1,32 @@
 # Release notes
 
+## Unreleased - GOAL Codex single-entry recovery contract
+
+- Recovery handoff now freezes the orchestration boundary that formal Codex
+  tasks enter only through Engineering Bridge; DS/shell direct Codex invocation
+  is diagnostic-only and cannot substitute for a Bridge task.
+- Task-local stalls (stdin/EOF, stale task/thread, internal delegation/memory,
+  Windows sandbox/SID/Git ownership, or write-authority conflicts) remain on the
+  Codex lane and recover through a fresh Bridge task instead of incorrectly
+  advancing the provider fallback chain.
+- Project-local mutation authority remains authoritative: DS-only-write
+  projects use Codex for read-only patch proposals, DS for application and
+  independent regression; generic Bridge controlled APPLY remains available
+  only where the project explicitly permits it.
+- Global npm -> bundled provider fallback is reserved for actual provider
+  unavailability; web-gpt-ds is reserved for provider-chain exhaustion or
+  token/capacity unavailability.
+- Successful Codex `run_task` and controlled-patch generate/refine executions
+  now emit Bridge-authored durable provenance into
+  `<config>.execution-receipts.json`; `task_result` exposes the matching bounded
+  receipt so Shoestring GOAL can verify exact workspace/task/operation/read-only
+  provenance instead of trusting caller self-attestation. The store is atomic,
+  serializes mutations, syncs the temporary file before rename, is capped at
+  500 records, contains no prompt/output text, and grants no write authority.
+  A Codex `continue` removes the previous ready receipt before the next turn so
+  a failed/running continuation cannot leave stale ready evidence behind; DSH
+  intentionally emits no Codex execution receipt.
+
 ## v1.2.1-biaogu.2 (custom fork)
 
 This custom build keeps the upstream v1.2.1 Windows launch model and the

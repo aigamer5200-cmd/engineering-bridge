@@ -7,6 +7,8 @@ import type { Executor, ExecutorEvidence } from "../executors/executor.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
+import type { ExecutionReceiptOperation } from "./execution-receipt-store.js";
+import { ExecutionReceiptStore } from "./execution-receipt-store.js";
 
 export type ExecutorName = "codex" | "dsh";
 
@@ -107,18 +109,26 @@ export class RegisteredWorkspaceTaskService {
 
   constructor(
     private readonly registry: RegisteredWorkspaceRegistry,
-    private readonly executorFactory: ExecutorFactory
+    private readonly executorFactory: ExecutorFactory,
+    private readonly executionReceipts?: ExecutionReceiptStore
   ) {}
 
   runTask(
     request: RegisteredWorkspaceTaskRequest,
     completedOutputTransform?: CompletedOutputTransform,
-    terminalTaskHandler?: TerminalTaskHandler
+    terminalTaskHandler?: TerminalTaskHandler,
+    receiptOperation?: ExecutionReceiptOperation
   ): { taskId: Id } {
     const taskId = newId();
     const normalizedRequest = { ...request, executor: request.executor ?? "codex" };
     this.tasks.set(taskId, { state: "queued", executor: normalizedRequest.executor });
-    queueMicrotask(() => void this.run(taskId, normalizedRequest, completedOutputTransform, terminalTaskHandler));
+    queueMicrotask(() => void this.run(
+      taskId,
+      normalizedRequest,
+      completedOutputTransform,
+      terminalTaskHandler,
+      receiptOperation
+    ));
     return { taskId };
   }
 
@@ -237,11 +247,15 @@ export class RegisteredWorkspaceTaskService {
   ): Promise<ControlledTaskView> {
     if (action === "accept") {
       if (record.state !== "waiting_for_supervisor_review") throw new CoreError("INVALID_STATE_TRANSITION");
+      await this.recordExecutionReceipt(taskId, record.request, "run_task", "completed");
       record.state = "completed";
       this.interactiveTerminalTaskIds.push(taskId);
       this.trimInteractiveTerminalTasks();
     } else if (action === "continue") {
       if (record.state !== "waiting_for_supervisor_review" || !instruction?.trim()) throw new CoreError("INVALID_STATE_TRANSITION");
+      if (record.request.executor === "codex") {
+        await this.executionReceipts?.remove(taskId);
+      }
       record.request = { ...record.request, instruction };
       record.state = "queued";
       queueMicrotask(() => void this.executeInteractive(taskId));
@@ -313,7 +327,17 @@ export class RegisteredWorkspaceTaskService {
         record.output = undefined;
         record.state = "failed";
         record.error = interruptedError();
-      } else { record.state = "waiting_for_supervisor_review"; record.output = result.output; }
+      } else {
+        record.output = result.output;
+        await this.recordExecutionReceipt(
+          taskId,
+          record.request,
+          "run_task",
+          "waiting_for_supervisor_review",
+          registration.root
+        );
+        record.state = "waiting_for_supervisor_review";
+      }
       if (record.state === "failed") this.recordInteractiveTerminalTask(taskId);
     } catch (error) {
       record.executor = undefined;
@@ -327,7 +351,8 @@ export class RegisteredWorkspaceTaskService {
     taskId: Id,
     request: NormalizedRegisteredWorkspaceTaskRequest,
     completedOutputTransform?: CompletedOutputTransform,
-    terminalTaskHandler?: TerminalTaskHandler
+    terminalTaskHandler?: TerminalTaskHandler,
+    receiptOperation?: ExecutionReceiptOperation
   ): Promise<void> {
     this.tasks.set(taskId, { state: "running", executor: request.executor });
     try {
@@ -354,6 +379,15 @@ export class RegisteredWorkspaceTaskService {
         : result.kind === "failed"
           ? { id: taskId, state: "failed", error: result.error }
           : interruptedTaskResult(taskId, result.output);
+      if (taskResult.state === "completed" && receiptOperation !== undefined) {
+        await this.recordExecutionReceipt(
+          taskId,
+          request,
+          receiptOperation,
+          "completed",
+          workspaceRoot
+        );
+      }
       await this.recordLegacyTerminalTask(taskId, taskResult, terminalTaskHandler);
     } catch (error) {
       const result: RegisteredWorkspaceTaskResult = {
@@ -380,6 +414,26 @@ export class RegisteredWorkspaceTaskService {
   private recordInteractiveTerminalTask(taskId: Id): void {
     this.interactiveTerminalTaskIds.push(taskId);
     this.trimInteractiveTerminalTasks();
+  }
+
+  private async recordExecutionReceipt(
+    taskId: Id,
+    request: NormalizedRegisteredWorkspaceTaskRequest,
+    operation: ExecutionReceiptOperation,
+    state: "waiting_for_supervisor_review" | "completed",
+    knownWorkspaceRoot?: string
+  ): Promise<void> {
+    if (request.executor !== "codex" || this.executionReceipts === undefined) return;
+    const workspaceRoot = knownWorkspaceRoot ?? this.registry.resolve(request.workspace_id);
+    await this.executionReceipts.record({
+      taskId,
+      workspaceId: request.workspace_id,
+      workspaceRoot,
+      executor: "codex",
+      operation,
+      readOnly: true,
+      state
+    });
   }
 
   private trimLegacyTerminalTasks(): void {

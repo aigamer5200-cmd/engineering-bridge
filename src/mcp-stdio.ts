@@ -12,6 +12,7 @@ import { DshExecutor } from "./executors/dsh-executor.js";
 import { VERSION } from "./version.js";
 import { CoreError, serializeError } from "./core/errors.js";
 import { RegisteredWorkspaceTaskService } from "./tasks/registered-workspace-task-service.js";
+import { ExecutionReceiptStore } from "./tasks/execution-receipt-store.js";
 import { ControlledPatchService } from "./tasks/controlled-patch-service.js";
 import { ManagedWorkspaceCatalog } from "./workspaces/managed-workspace-catalog.js";
 import { RegisteredWorkspaceRegistry } from "./workspaces/registered-workspace-registry.js";
@@ -83,6 +84,8 @@ async function main(): Promise<void> {
     catalog,
     projectRootEntries.map(({ root }) => root)
   );
+  const executionReceipts = new ExecutionReceiptStore(`${configPath}.execution-receipts.json`);
+  await executionReceipts.load();
   const service = new RegisteredWorkspaceTaskService(
     registry,
     (executor, workspaceRoot) => {
@@ -90,7 +93,8 @@ async function main(): Promise<void> {
         case "codex": return new CodexExecutor(workspaceRoot);
         case "dsh": return new DshExecutor(workspaceRoot);
       }
-    }
+    },
+    executionReceipts
   );
   const controlledPatches = new ControlledPatchService(
     registry,
@@ -125,6 +129,11 @@ async function main(): Promise<void> {
   }, ({ task_id }) => {
     const view = service.taskView(task_id);
     if (view === undefined) return unknownTask();
+    const storedReceipt = executionReceipts.get(task_id);
+    const receipt = storedReceipt !== undefined && (
+      (view.state === "waiting_for_supervisor_review" && storedReceipt.state === "waiting_for_supervisor_review") ||
+      (view.state === "completed" && storedReceipt.state === "completed")
+    ) ? storedReceipt : undefined;
     return jsonContent({ task_id: view.taskId, state: view.state,
       ...(view.source === undefined ? {} : { source: view.source }),
       ...(view.executor === undefined ? {} : { executor: view.executor }),
@@ -134,6 +143,18 @@ async function main(): Promise<void> {
       ...(view.review_output === undefined ? {} : { review_output: view.review_output }),
       ...(view.partial_output === undefined ? {} : { partial_output: view.partial_output }),
       evidence: view.evidence,
+      ...(receipt === undefined ? {} : {
+        execution_receipt: {
+          workspace_id: receipt.workspaceId,
+          workspace_root: receipt.workspaceRoot,
+          task_id: receipt.taskId,
+          executor: receipt.executor,
+          operation: receipt.operation,
+          read_only: receipt.readOnly,
+          state: receipt.state,
+          recorded_at: receipt.recordedAt
+        }
+      }),
       ...(view.error === undefined ? {} : { error: view.error }) });
   });
 

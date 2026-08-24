@@ -298,7 +298,7 @@ export class ControlledPatchService {
         this.tasks.unpinTask(result.id);
         throw error;
       }
-    });
+    }, parentTaskId === undefined ? "generate_controlled_patch" : "refine_controlled_patch");
     this.proposals.set(taskId, {
       workspaceId,
       workspaceRoot,

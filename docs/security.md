@@ -10,6 +10,9 @@ This document separates enforced behavior from operating assumptions for the Eng
 - `partial_output` is returned only from a genuine interrupted executor result; the task state stays `failed`, and ordinary failures never re-expose stderr or partial stdout.
 - Codex evidence stays within its existing bounds (string length, changes count, total entry count); truncation and eviction are made visible through explicit markers rather than silently dropped. Markers indicate incomplete diagnostic information, not a complete transcript.
 - Write access defaults to disabled. Manual workspaces enable it through `allow_write: true` in `workspaces.json`; managed workspaces grant it only through `authorize_workspace_write` with exact `AUTHORIZE`, which never modifies a manual registration.
+- `<config>.execution-receipts.json` is provenance-only state. It contains
+  bounded Bridge-authored Codex execution identity/boundary metadata, never
+  prompt/output/credentials, and cannot grant controlled-write permission.
 - Controlled patch generation and refinement are read-only and require no write authorization; they verify a clean Git top-level (existing HEAD or unborn-base support) and record the base HEAD. Files are not modified during generation or refinement.
 - Application requires exact, case-sensitive `APPLY`, a completed one-use proposal, controlled-write permission, and rechecks the canonical Git root, HEAD, and clean tracked worktree/index before validating the patch.
 - Patch validation accepts modifications to existing tracked regular files and exact 100644 ordinary text-file additions whose target is absent from base HEAD, the index, and the worktree; unborn bases support additions only.
@@ -28,6 +31,12 @@ The human reviewer must inspect every path and hunk in a proposal before supplyi
 Two local state files provide restart persistence, both written atomically (write-temporary-then-rename) with mode 0600:
 
 - `<config>.managed-workspaces.json` — the managed workspace catalog (registrations and controlled-write authorization). Individually invalid records are skipped on load; persist failures roll back the in-memory change.
+- `<config>.execution-receipts.json` — newest 500 Bridge-authored successful
+  read-only Codex execution receipts. Invalid records are skipped; mutations
+  are serialized, temporary files use mode 0600, file contents are synced
+  before atomic rename, and failed persistence rolls back the in-memory
+  mutation. This guarantees the Bridge's process-restart persistence contract,
+  not full power-loss journaling.
 - `<config>.controlled-patches.json` — controlled-patch proposals and applied history. Invalid retained records are quarantined without blocking startup; duplicate identity, applied-history contradictions, and other global invariants still fail closed.
 
 These files are not a credential store and not a complete audit log. Active task supervision state (tasks, threads, evidence, review outputs) remains process-local and disappears on restart.

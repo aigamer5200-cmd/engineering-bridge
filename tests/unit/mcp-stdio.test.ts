@@ -24,6 +24,11 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     assert.match(source, /import\s+\{\s*VERSION\s*\}\s+from\s+["'][^"']*version\.js["'];/u);
     assert.match(source, /version:\s*VERSION\b/u);
   }
+  const mcpSource = readFileSync("src/mcp-stdio.ts", "utf8");
+  assert.match(mcpSource, /executionReceipts\.get\(task_id\)/u);
+  assert.match(mcpSource, /execution_receipt:/u);
+  assert.match(mcpSource, /view\.state === "waiting_for_supervisor_review"/u);
+  assert.match(mcpSource, /view\.state === "completed"/u);
 
   const configPath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-mcp-")), "workspaces.json");
   writeFileSync(configPath, "[]\n");
