@@ -11,6 +11,8 @@ Engineering Bridge is a local STDIO MCP server with nine tools and a small layer
 
 On Windows, Codex provider selection is deliberately package-stable. When PATH exposes a valid global npm `codex.cmd` whose sibling `node_modules/@openai/codex/bin/codex.js` exists, `CodexExecutor` selects that official global npm installation before any directly spawnable `codex.exe` (for example a VS Code extension-bundled copy). The npm shim itself is never executed through `cmd.exe`; Bridge launches its resolved JavaScript target with `process.execPath`. If the global npm package is absent or incomplete, normal direct-executable resolution remains the fallback. Local `node_modules/.bin` shims are still supported, but they do not outrank a real executable merely because global-provider preference is enabled.
 
+Bridge provider selection is only the Codex layer of the wider Shoestring GOAL continuity chain. The orchestrator treats `CODEX_UNAVAILABLE` after the allowed provider fallback (and equivalent Codex-capacity unavailability) as a recoverable executor interruption when DS remains available: Telegram is emitted through the shared GOAL runtime, executor mode is switched durably to `web-gpt-ds`, and the same frozen GOAL continues under Web GPT direction with DS execution. Bridge itself does not invoke DevSpace or silently replace Codex with DS; that third-tier routing decision remains in the authoritative GOAL orchestration layer.
+
 There is no HTTP server, UI, database, account system, background daemon, remote transport, or general command runner.
 
 ## Read-only supervised task flow

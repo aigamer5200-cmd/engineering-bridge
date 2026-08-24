@@ -18,4 +18,9 @@ test("recovery handoff freezes the reason-agnostic GOAL Telegram stop rule", () 
   assert.match(watchdog, /A final verified C\/P is different/u);
   assert.match(watchdog, /Owner deciding whether to authorize I\/W/u);
   assert.match(watchdog, /after that final C\/P is durable/u);
+  assert.match(watchdog, /standalone global npm Codex provider first/u);
+  assert.match(watchdog, /VS Code bundled codex\.exe fallback/u);
+  assert.match(watchdog, /switch the Shoestring GOAL executor mode to web-gpt-ds/u);
+  assert.match(watchdog, /continue the same frozen GOAL with Web GPT \+ DS/u);
+  assert.match(watchdog, /Do not stop merely because Codex is unavailable/u);
 });

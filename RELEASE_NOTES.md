@@ -20,6 +20,11 @@ npm Codex installation the stable primary Windows provider.
   valid global npm installation.
 - Local `node_modules/.bin` shims remain supported but do not gain global
   provider priority. DSH keeps its existing native-executable-first behavior.
+- GOAL orchestration keeps a third continuity tier above Bridge provider
+  selection: if standalone global npm Codex and the bundled `codex.exe`
+  fallback cannot provide a usable Codex executor (or Codex is otherwise
+  unavailable), the runtime emits the required interruption Telegram, switches
+  durably to `web-gpt-ds`, and continues the same frozen GOAL with DS.
 
 ### Verification
 
