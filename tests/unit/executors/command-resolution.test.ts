@@ -61,6 +61,66 @@ test("a real executable is preferred over a .cmd shim anywhere on PATH", () => {
   assert.deepEqual(reversed, { kind: "direct", executable: exe });
 });
 
+test("preferGlobalNodeShim selects a valid global npm shim before a real executable", () => {
+  const globalShimDir = directory();
+  const exeDir = directory();
+  touch(globalShimDir, "codex.cmd");
+  const binJs = touch(globalShimDir, "node_modules", "@openai", "codex", "bin", "codex.js");
+  touch(exeDir, "codex.exe");
+  const options = { nodeTarget: CODEX_NODE_TARGET, preferGlobalNodeShim: true } as const;
+
+  assert.deepEqual(resolve({ PATH: `${exeDir};${globalShimDir}` }, "codex", options), {
+    kind: "node-launcher", scriptPath: binJs
+  });
+  assert.deepEqual(resolve({ PATH: `${globalShimDir};${exeDir}` }, "codex", options), {
+    kind: "node-launcher", scriptPath: binJs
+  });
+});
+
+test("preferGlobalNodeShim falls back to a real executable when the global npm package is incomplete", () => {
+  const shimDir = directory();
+  const exeDir = directory();
+  touch(shimDir, "codex.cmd");
+  const exe = touch(exeDir, "codex.exe");
+
+  assert.deepEqual(resolve({ PATH: `${shimDir};${exeDir}` }, "codex", {
+    nodeTarget: CODEX_NODE_TARGET,
+    preferGlobalNodeShim: true
+  }), { kind: "direct", executable: exe });
+});
+
+test("preferGlobalNodeShim skips an incomplete earlier shim and finds a later valid global npm package", () => {
+  const brokenShimDir = directory();
+  const bundledExeDir = directory();
+  const validGlobalDir = directory();
+  touch(brokenShimDir, "codex.cmd");
+  touch(bundledExeDir, "codex.exe");
+  touch(validGlobalDir, "codex.cmd");
+  const binJs = touch(validGlobalDir, "node_modules", "@openai", "codex", "bin", "codex.js");
+
+  assert.deepEqual(resolve({
+    PATH: `${brokenShimDir};${bundledExeDir};${validGlobalDir}`
+  }, "codex", {
+    nodeTarget: CODEX_NODE_TARGET,
+    preferGlobalNodeShim: true
+  }), { kind: "node-launcher", scriptPath: binJs });
+});
+
+test("preferGlobalNodeShim does not promote a local node_modules/.bin shim over a real executable", () => {
+  const root = directory();
+  const localBinDir = join(root, "node_modules", ".bin");
+  mkdirSync(localBinDir, { recursive: true });
+  touch(localBinDir, "codex.cmd");
+  touch(root, "node_modules", "@openai", "codex", "bin", "codex.js");
+  const exeDir = directory();
+  const exe = touch(exeDir, "codex.exe");
+
+  assert.deepEqual(resolve({ PATH: `${localBinDir};${exeDir}` }, "codex", {
+    nodeTarget: CODEX_NODE_TARGET,
+    preferGlobalNodeShim: true
+  }), { kind: "direct", executable: exe });
+});
+
 test("an npm codex.cmd shim with a derivable global-layout target becomes a node launcher", () => {
   const dir = directory();
   touch(dir, "codex.cmd");

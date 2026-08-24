@@ -615,6 +615,26 @@ test("win32: an npm codex.cmd shim resolves to the official bin/codex.js and run
   assert.equal(invocation.options.cwd, TRUSTED_CWD);
 });
 
+test("win32: a valid global npm Codex provider wins over a bundled codex.exe", async () => {
+  const globalDir = windowsDirectory();
+  writeFileSync(join(globalDir, "codex.cmd"), "");
+  const binJs = join(globalDir, "node_modules", "@openai", "codex", "bin", "codex.js");
+  mkdirSync(join(globalDir, "node_modules", "@openai", "codex", "bin"), { recursive: true });
+  writeFileSync(binJs, "");
+  const bundledDir = windowsDirectory();
+  writeFileSync(join(bundledDir, "codex.exe"), "");
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(TRUSTED_CWD,
+    fakeStarter({ appServerOutput: "final answer" }, invocations),
+    { PATH: `${bundledDir};${globalDir}` }, "win32");
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+
+  assert.equal(result.kind, "completed");
+  assert.equal(invocations[0]?.executable, process.execPath);
+  assert.deepEqual(invocations[0]?.args, [binJs, "app-server", "--stdio"]);
+});
+
 test("win32: a local node_modules/.bin codex.cmd shim also resolves to bin/codex.js under Node", async () => {
   const dir = windowsDirectory();
   const binDir = join(dir, "node_modules", ".bin");

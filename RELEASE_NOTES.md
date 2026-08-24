@@ -1,5 +1,35 @@
 # Release notes
 
+## v1.2.1-biaogu.2 (custom fork)
+
+This custom build keeps the upstream v1.2.1 Windows launch model and the
+`biaogu.1` workflow integration, while making the official standalone global
+npm Codex installation the stable primary Windows provider.
+
+### Standalone Codex CLI primary provider
+
+- When Windows `PATH` exposes a valid global npm `codex.cmd` together with its
+  official `node_modules/@openai/codex/bin/codex.js`, Bridge selects that
+  package-managed Codex before any directly spawnable `codex.exe`, including a
+  VS Code extension-bundled copy.
+- Bridge still launches the npm Codex JavaScript entrypoint directly through
+  `process.execPath`; it never runs the `.cmd` through `cmd.exe` and never turns
+  on `shell: true`.
+- If the global npm package is missing or incomplete, direct executable
+  resolution remains the fallback. A broken earlier shim cannot hide a later
+  valid global npm installation.
+- Local `node_modules/.bin` shims remain supported but do not gain global
+  provider priority. DSH keeps its existing native-executable-first behavior.
+
+### Verification
+
+- Windows resolver/executor tests freeze global-npm-primary, bundled-exe
+  fallback, incomplete-package fallback, and broken-shim scanning behavior.
+- A real local smoke with the VS Code bundled directory intentionally placed
+  before the global npm directory still selected
+  `@openai/codex/bin/codex.js`, started `app-server --stdio`, returned a native
+  Codex thread, and completed successfully.
+
 ## v1.2.1-biaogu.1 (custom fork)
 
 This custom build is based on upstream Engineering Bridge v1.2.1. The `biaogu.1` suffix identifies local workflow integration and avoids claiming or colliding with a future upstream v1.3.0 release.

@@ -89,7 +89,7 @@ Engineering Bridge 是一个在你电脑上运行的小型“工程桥梁”。�
 
 **按执行器准备：**
 
-- **Codex：** 安装并认证 `codex` CLI，使其可从 `PATH` 调用。Bridge 以 `codex app-server --stdio` 启动 Codex：不经过 shell，approval 为 `never`，网络禁用。
+- **Codex：** 安装并认证官方 `codex` CLI，使其可从 `PATH` 调用。Windows 建议使用 `npm i -g @openai/codex` 的全局 npm 安装作为稳定主提供者；如果 PATH 同时可见有效的 global npm Codex 与其他 `codex.exe`，Bridge 会优先 global npm package，其他 executable 只作为 fallback。Bridge 以 `codex app-server --stdio` 启动 Codex：不经过 shell，approval 为 `never`，网络禁用。
 - **DSH：** 安装官方 npm 包 `@deepseek-ai/dsh`；`dsh` 可从 `PATH` 调用，或由 Bridge 经 `DSH_HOME`/`~/.dsh` 的 profiles 回退路径找到。若 Bridge 运行环境的环境变量中设置了 `DEEPSEEK_API_KEY`，Bridge 会将其转发给 DSH——这是 Bridge 转发的唯一凭据环境变量；密钥不要写进配置文件（见第 4 节）。Bridge 以 `dsh --profile headless <指令>` 启动 DSH，并自行固定 `DSH_PERMISSION_MODE=read-only`——请勿自行设置该变量。`DSH_TOOLS_MODE` 是可选透传；proxy 变量不会转发。
 
 ### 2. Clone、安装与构建

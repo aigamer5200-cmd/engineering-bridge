@@ -9,6 +9,8 @@ Engineering Bridge is a local STDIO MCP server with nine tools and a small layer
 3. `RegisteredWorkspaceTaskService` assigns UUID task IDs and holds task, supervisor-review, thread, output, partial-output, error, and evidence state in process memory. It resolves the requested executor through an `ExecutorFactory` and drives `CodexExecutor` or `DshExecutor`.
 4. `CodexExecutor` starts the local `codex app-server --stdio` protocol with fixed read-only task settings. `DshExecutor` starts the official headless `dsh` interface with a per-process `DSH_PERMISSION_MODE=read-only` pin and an explicit environment allowlist (including `DEEPSEEK_API_KEY` and `DSH_TOOLS_MODE`; proxy variables excluded). `ControlledPatchService` records proposal metadata (persisted to `<config>.controlled-patches.json`) and uses fixed Git commands to validate and apply reviewed patches.
 
+On Windows, Codex provider selection is deliberately package-stable. When PATH exposes a valid global npm `codex.cmd` whose sibling `node_modules/@openai/codex/bin/codex.js` exists, `CodexExecutor` selects that official global npm installation before any directly spawnable `codex.exe` (for example a VS Code extension-bundled copy). The npm shim itself is never executed through `cmd.exe`; Bridge launches its resolved JavaScript target with `process.execPath`. If the global npm package is absent or incomplete, normal direct-executable resolution remains the fallback. Local `node_modules/.bin` shims are still supported, but they do not outrank a real executable merely because global-provider preference is enabled.
+
 There is no HTTP server, UI, database, account system, background daemon, remote transport, or general command runner.
 
 ## Read-only supervised task flow

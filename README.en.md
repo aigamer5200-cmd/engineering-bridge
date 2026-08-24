@@ -89,7 +89,7 @@ For controlled writes, the project must also be a clean Git top-level (with an e
 
 **Per executor:**
 
-- **Codex:** install and authenticate the `codex` CLI so it is callable from `PATH`. Bridge launches Codex through `codex app-server --stdio`: no shell, approval `never`, network disabled.
+- **Codex:** install and authenticate the official `codex` CLI so it is callable from `PATH`. On Windows, the recommended stable provider is the global npm installation (`npm i -g @openai/codex`). When a valid global npm package and another `codex.exe` are both visible, Bridge prefers the global npm package and uses the other executable only as fallback. Bridge launches Codex through `codex app-server --stdio`: no shell, approval `never`, network disabled.
 - **DSH:** install the official npm package `@deepseek-ai/dsh`; `dsh` must be callable from `PATH` or resolvable by Bridge through the `DSH_HOME`/`~/.dsh` profiles fallback. If `DEEPSEEK_API_KEY` is set in the environment Bridge runs under, Bridge forwards it to DSH—it is the only credential environment variable Bridge forwards. Keep it out of config files (see section 4). Bridge launches DSH with `dsh --profile headless <instruction>` and pins `DSH_PERMISSION_MODE=read-only` itself—do not set it yourself. `DSH_TOOLS_MODE` is an optional passthrough; proxy variables are not forwarded.
 
 ### 2. Clone, install, and build

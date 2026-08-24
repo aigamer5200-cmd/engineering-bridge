@@ -82,14 +82,19 @@ export class CodexExecutor implements Executor {
         cwd: this.workspaceRoot, shell: false, stdio: ["pipe", "pipe", "pipe"],
         detached: this.platform !== "win32", env: environment(this.hostEnvironment)
       };
-      // Windows: a directly spawnable codex.exe is preferred; an npm-installed
-      // codex.cmd shim is resolved to the official bin/codex.js Node target and
-      // launched through Node directly. Nothing here goes through a shell, and
-      // the user instruction travels over stdin, never through the command
-      // line. Everywhere else (and as the Windows fallback) the original bare
+      // Windows: a valid global npm Codex installation is the primary provider
+      // even when a VS Code-bundled codex.exe is also visible on PATH. The
+      // global codex.cmd shim is resolved to the official bin/codex.js Node
+      // target and launched through Node directly. If that package-managed
+      // provider is absent/incomplete, normal direct-executable resolution is
+      // retained as the fallback. Nothing here goes through a shell, and the
+      // user instruction travels over stdin, never through the command line.
+      // Everywhere else (and as the Windows final fallback) the original bare
       // "codex" spawn is unchanged.
       const resolved = resolveCommand(this.hostEnvironment, "codex", {
-        nodeTarget: CODEX_NODE_TARGET, platform: this.platform
+        nodeTarget: CODEX_NODE_TARGET,
+        preferGlobalNodeShim: true,
+        platform: this.platform
       });
       if (resolved.kind === "direct") {
         child = this.startProcess(resolved.executable, ["app-server", "--stdio"], options);
