@@ -1,6 +1,9 @@
 # Release notes
 
-## Unreleased - GOAL Codex single-entry recovery contract
+## v1.2.1-biaogu.3 (custom fork)
+
+This custom build hardens the GOAL Codex single-entry contract on top of
+`biaogu.2` without changing the production topology or Codex execution profile.
 
 - Recovery handoff now freezes the orchestration boundary that formal Codex
   tasks enter only through Engineering Bridge; DS/shell direct Codex invocation
