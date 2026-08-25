@@ -1,5 +1,27 @@
 # Release notes
 
+## v1.2.1-biaogu.4 (custom fork)
+
+This custom build promotes the read-only Shoestring GOAL Codex Observer already
+integrated on `main` into a distinct immutable runtime version. It preserves the
+`biaogu.3` Bridge/Codex execution behavior and the current Web GPT + DS / Codex
+role boundary.
+
+- `ENGINEERING_BRIDGE_OBSERVER_MODE=log` enables bounded task observation in a
+  sidecar log; `window` additionally opens the detached Windows PowerShell
+  observer titled `Shoestring GOAL - Codex Observer`.
+- The observer is read-only and best-effort. It never becomes a controller,
+  planner, reviewer, repair authority, C/P authority, or I/W authority; Bridge
+  remains the sole Codex execution controller.
+- Observer output is intentionally bounded: task/executor/state, native thread
+  id, bounded command evidence, and changed-file paths only. Full task prompts,
+  result bodies, diff bodies, credentials, and secrets are not emitted.
+- The observer log is capped at approximately 512 KiB and observer failures are
+  non-fatal to Bridge task execution.
+- Observer mode remains environment-controlled so the same immutable runtime can
+  be canary-tested, switched, and rolled back through the existing painless
+  upgrade control plane.
+
 ## v1.2.1-biaogu.3 (custom fork)
 
 This custom build hardens the GOAL Codex single-entry contract on top of
