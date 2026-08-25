@@ -176,6 +176,13 @@ executor, Codex thread id, bounded commands, and changed file paths, but never
 logs full prompts or diff bodies and cannot steer, interrupt, accept, continue,
 or otherwise control a task. The default is off.
 
+In the Biaogu production deployment, the backend observer is intentionally kept
+in bounded `log` mode while the visible observer window is **off by default**.
+The local control plane can open that tail window at the beginning of a task or
+midway through an existing task without restarting Bridge or replacing the
+active Codex thread, and can close only the UI while bounded background logging
+continues.
+
 ```sh
 git -C /absolute/path/to/my-project status --short
 ```
