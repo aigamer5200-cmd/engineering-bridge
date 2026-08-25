@@ -9,6 +9,7 @@ import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.j
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { ExecutionReceiptOperation } from "./execution-receipt-store.js";
 import { ExecutionReceiptStore } from "./execution-receipt-store.js";
+import type { TaskObserver, TaskObserverState } from "./task-observer.js";
 
 export type ExecutorName = "codex" | "dsh";
 
@@ -110,7 +111,8 @@ export class RegisteredWorkspaceTaskService {
   constructor(
     private readonly registry: RegisteredWorkspaceRegistry,
     private readonly executorFactory: ExecutorFactory,
-    private readonly executionReceipts?: ExecutionReceiptStore
+    private readonly executionReceipts?: ExecutionReceiptStore,
+    private readonly observer?: TaskObserver
   ) {}
 
   runTask(
@@ -122,6 +124,7 @@ export class RegisteredWorkspaceTaskService {
     const taskId = newId();
     const normalizedRequest = { ...request, executor: request.executor ?? "codex" };
     this.tasks.set(taskId, { state: "queued", executor: normalizedRequest.executor });
+    this.observeState(taskId, normalizedRequest.executor, "queued");
     queueMicrotask(() => void this.run(
       taskId,
       normalizedRequest,
@@ -182,6 +185,7 @@ export class RegisteredWorkspaceTaskService {
     const taskId = newId();
     const normalizedRequest = { ...request, executor: request.executor ?? "codex" };
     this.interactive.set(taskId, { state: "queued", request: normalizedRequest, evidence: [] });
+    this.observeState(taskId, normalizedRequest.executor, "queued");
     queueMicrotask(() => void this.executeInteractive(taskId));
     return { taskId };
   }
@@ -249,6 +253,7 @@ export class RegisteredWorkspaceTaskService {
       if (record.state !== "waiting_for_supervisor_review") throw new CoreError("INVALID_STATE_TRANSITION");
       await this.recordExecutionReceipt(taskId, record.request, "run_task", "completed");
       record.state = "completed";
+      this.observeState(taskId, record.request.executor, "completed");
       this.interactiveTerminalTaskIds.push(taskId);
       this.trimInteractiveTerminalTasks();
     } else if (action === "continue") {
@@ -258,6 +263,7 @@ export class RegisteredWorkspaceTaskService {
       }
       record.request = { ...record.request, instruction };
       record.state = "queued";
+      this.observeState(taskId, record.request.executor, "queued");
       queueMicrotask(() => void this.executeInteractive(taskId));
     } else if (action === "steer") {
       // DSH headless has no steer seam: the action is unsupported for the
@@ -303,6 +309,7 @@ export class RegisteredWorkspaceTaskService {
     const record = this.interactive.get(taskId);
     if (!record) return;
     record.state = "running";
+    this.observeState(taskId, record.request.executor, "running");
     try {
       const registration = this.registry.resolveExecution(record.request.workspace_id);
       const executor = this.executorFactory(record.request.executor, registration.root);
@@ -314,10 +321,19 @@ export class RegisteredWorkspaceTaskService {
       });
       const result = await executor.execute({ taskId, instruction,
         sandbox: "read-only", threadId: record.threadId,
-        onEvidence: (items) => { record.evidence = items; } });
+        onEvidence: (items) => {
+          record.evidence = items;
+          this.observeEvidence(taskId, record.request.executor, items);
+        } });
       record.executor = undefined;
       record.threadId = result.threadId ?? record.threadId;
       record.evidence = result.evidence ?? record.evidence;
+      if (result.threadId !== undefined) {
+        this.observeThread(taskId, record.request.executor, result.threadId);
+      }
+      if (result.evidence !== undefined) {
+        this.observeEvidence(taskId, record.request.executor, result.evidence);
+      }
       if (result.kind === "failed") { record.state = "failed"; record.error = result.error; }
       else if (result.kind === "interrupted") {
         // The failed terminal state and its safe error are unchanged; the
@@ -338,11 +354,13 @@ export class RegisteredWorkspaceTaskService {
         );
         record.state = "waiting_for_supervisor_review";
       }
+      this.observeState(taskId, record.request.executor, record.state);
       if (record.state === "failed") this.recordInteractiveTerminalTask(taskId);
     } catch (error) {
       record.executor = undefined;
       record.state = "failed";
       record.error = serializeError(error);
+      this.observeState(taskId, record.request.executor, "failed");
       this.recordInteractiveTerminalTask(taskId);
     }
   }
@@ -355,6 +373,7 @@ export class RegisteredWorkspaceTaskService {
     receiptOperation?: ExecutionReceiptOperation
   ): Promise<void> {
     this.tasks.set(taskId, { state: "running", executor: request.executor });
+    this.observeState(taskId, request.executor, "running");
     try {
       const workspaceRoot = this.registry.resolve(request.workspace_id);
       const executor = this.executorFactory(request.executor, workspaceRoot);
@@ -367,7 +386,21 @@ export class RegisteredWorkspaceTaskService {
         workspaceRoot,
         executor: request.executor
       });
-      const result = await executor.execute({ taskId, instruction });
+      const result = await executor.execute(
+        this.observer === undefined
+          ? { taskId, instruction }
+          : {
+            taskId,
+            instruction,
+            onEvidence: (items) => this.observeEvidence(taskId, request.executor, items)
+          }
+      );
+      if (result.threadId !== undefined) {
+        this.observeThread(taskId, request.executor, result.threadId);
+      }
+      if (result.evidence !== undefined) {
+        this.observeEvidence(taskId, request.executor, result.evidence);
+      }
       const taskResult: RegisteredWorkspaceTaskResult = result.kind === "completed"
         ? {
           id: taskId,
@@ -407,6 +440,7 @@ export class RegisteredWorkspaceTaskService {
     await terminalTaskHandler?.(result);
     const executor = this.tasks.get(taskId)?.executor ?? "codex";
     this.tasks.set(taskId, { state: result.state, executor, result });
+    this.observeState(taskId, executor, result.state);
     this.legacyTerminalTaskIds.push(taskId);
     this.trimLegacyTerminalTasks();
   }
@@ -414,6 +448,42 @@ export class RegisteredWorkspaceTaskService {
   private recordInteractiveTerminalTask(taskId: Id): void {
     this.interactiveTerminalTaskIds.push(taskId);
     this.trimInteractiveTerminalTasks();
+  }
+
+  private observeState(
+    taskId: Id,
+    executor: ExecutorName | undefined,
+    state: TaskObserverState,
+  ): void {
+    try {
+      this.observer?.state(taskId, executor, state);
+    } catch {
+      // Observation is best effort and cannot affect task control.
+    }
+  }
+
+  private observeThread(
+    taskId: Id,
+    executor: ExecutorName | undefined,
+    threadId: string,
+  ): void {
+    try {
+      this.observer?.thread(taskId, executor, threadId);
+    } catch {
+      // Observation is best effort and cannot affect task control.
+    }
+  }
+
+  private observeEvidence(
+    taskId: Id,
+    executor: ExecutorName | undefined,
+    evidence: readonly ExecutorEvidence[],
+  ): void {
+    try {
+      this.observer?.evidence(taskId, executor, evidence);
+    } catch {
+      // Observation is best effort and cannot affect task control.
+    }
   }
 
   private async recordExecutionReceipt(

@@ -54,6 +54,26 @@ Conditional fields:
 
 `evidence` contains bounded command-execution and file-change items. When the existing bounds truncate or evict evidence, explicit markers are returned: strings cut by the size bound end with `[truncated]`, an oversized changes list gains a `[truncated: N additional changes omitted]` entry, and evidence evicted by the total count limit is reported through a synthetic `evidence-drop` item. These markers mean the diagnostic information is incomplete.
 
+### Optional read-only task observer
+
+Bridge can expose the same bounded task activity to a local observer without
+creating a second controller. Set `ENGINEERING_BRIDGE_OBSERVER_MODE` before
+starting the MCP server:
+
+- unset / any other value: observer disabled (default);
+- `log`: append a bounded sidecar log at `<workspaces-config>.observer.log`;
+- `window`: use the same sidecar log and, on Windows, launch one detached
+  PowerShell window titled `Shoestring GOAL - Codex Observer` that tails it.
+  Non-Windows hosts degrade to log-only behavior.
+
+The observer records task id, selected executor, state transitions, native
+Codex thread id when available, bounded command evidence, and file-change
+paths/status. It never receives or writes the full task instruction/prompt and
+never writes diff contents. The sidecar is bounded to approximately 512 KiB and
+lives next to the external Bridge workspace configuration, not inside a target
+repository. Observer failures are best-effort/non-fatal and cannot steer,
+interrupt, accept, continue, or otherwise change task execution.
+
 ## `control_task`
 
 Inputs: `task_id`, `action`, and optional `instruction`.
