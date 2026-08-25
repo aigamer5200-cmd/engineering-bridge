@@ -24,6 +24,11 @@ role boundary.
 - Observer mode remains environment-controlled so the same immutable runtime can
   be canary-tested, switched, and rolled back through the existing painless
   upgrade control plane.
+- The Biaogu production control plane runs bounded observation in `log` mode
+  while keeping the visible observer UI closed by default. The tail window may
+  be opened at the start of a task or midway through an existing task without
+  restarting Bridge or replacing the active Codex native thread; closing the
+  UI leaves bounded background logging active.
 
 ## v1.2.1-biaogu.3 (custom fork)
 
