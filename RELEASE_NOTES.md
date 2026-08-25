@@ -10,6 +10,9 @@ role boundary.
 - `ENGINEERING_BRIDGE_OBSERVER_MODE=log` enables bounded task observation in a
   sidecar log; `window` additionally opens the detached Windows PowerShell
   observer titled `Shoestring GOAL - Codex Observer`.
+- Windows `window` mode uses a per-log-path live-process lease so concurrent MCP
+  backend sessions reuse the same observer window instead of opening duplicate
+  PowerShell tails.
 - The observer is read-only and best-effort. It never becomes a controller,
   planner, reviewer, repair authority, C/P authority, or I/W authority; Bridge
   remains the sole Codex execution controller.

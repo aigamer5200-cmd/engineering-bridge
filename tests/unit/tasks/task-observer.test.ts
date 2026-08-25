@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -92,6 +92,23 @@ test("observer is off unless explicitly enabled", () => {
     );
     assert.equal(createTaskObserver(configPath, {}), undefined);
     assert.equal(existsSync(`${configPath}.observer.log`), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("window observer reuses an existing live observer lease", { skip: process.platform !== "win32" }, () => {
+  const directory = mkdtempSync(join(tmpdir(), "engineering-bridge-observer-window-"));
+  try {
+    const configPath = join(directory, "workspaces.json");
+    const leasePath = `${configPath}.observer.log.window.pid`;
+    writeFileSync(leasePath, `${process.pid}\n`, "utf8");
+
+    const observer = new TaskObserverLogger(configPath, "window");
+
+    assert.equal(observer.logPath, `${configPath}.observer.log`);
+    assert.equal(readFileSync(leasePath, "utf8"), `${process.pid}\n`);
+    assert.match(readFileSync(observer.logPath, "utf8"), /observer=ready mode=window/u);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

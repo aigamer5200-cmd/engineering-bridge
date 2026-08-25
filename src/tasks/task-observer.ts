@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 
 import type { ExecutorEvidence } from "../executors/executor.js";
 
@@ -22,6 +22,33 @@ export const MAX_OBSERVER_LOG_BYTES = 512 * 1024;
 const MAX_EVIDENCE_ITEMS = 20;
 const MAX_CHANGE_PATHS = 8;
 const MAX_FIELD_LENGTH = 220;
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readLeasePid(path: string): number | undefined {
+  try {
+    const value = Number.parseInt(readFileSync(path, "utf8").trim(), 10);
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function removeLeaseIfOwned(path: string, pid: number): void {
+  try {
+    if (readLeasePid(path) === pid) rmSync(path, { force: true });
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
 
 function bounded(value: unknown): string {
   return String(value)
@@ -106,7 +133,17 @@ export class TaskObserverLogger implements TaskObserver {
   private launchWindow(): void {
     if (this.windowLaunchAttempted) return;
     this.windowLaunchAttempted = true;
+    const leasePath = `${this.logPath}.window.pid`;
     try {
+      const existingPid = readLeasePid(leasePath);
+      if (existingPid !== undefined && processIsAlive(existingPid)) return;
+      rmSync(leasePath, { force: true });
+      try {
+        writeFileSync(leasePath, `${process.pid}\n`, { encoding: "utf8", flag: "wx" });
+      } catch {
+        return;
+      }
+
       const literalPath = this.logPath.replace(/'/gu, "''");
       const title = "Shoestring GOAL - Codex Observer";
       const command = `$Host.UI.RawUI.WindowTitle='${title}'; Get-Content -LiteralPath '${literalPath}' -Wait`;
@@ -115,9 +152,15 @@ export class TaskObserverLogger implements TaskObserver {
         ["-NoLogo", "-NoProfile", "-NoExit", "-Command", command],
         { detached: true, stdio: "ignore", windowsHide: false },
       );
-      child.once("error", () => undefined);
+      if (child.pid === undefined) {
+        removeLeaseIfOwned(leasePath, process.pid);
+      } else {
+        writeFileSync(leasePath, `${child.pid}\n`, "utf8");
+        child.once("error", () => removeLeaseIfOwned(leasePath, child.pid!));
+      }
       child.unref();
     } catch {
+      removeLeaseIfOwned(leasePath, process.pid);
       // Window launch is optional; log-only observation remains available.
     }
   }
