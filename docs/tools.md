@@ -54,6 +54,12 @@ Conditional fields:
 
 `evidence` contains bounded command-execution and file-change items. When the existing bounds truncate or evict evidence, explicit markers are returned: strings cut by the size bound end with `[truncated]`, an oversized changes list gains a `[truncated: N additional changes omitted]` entry, and evidence evicted by the total count limit is reported through a synthetic `evidence-drop` item. These markers mean the diagnostic information is incomplete.
 
+For Shoestring GOAL specifically, Bridge's `waiting_for_supervisor_review` /
+`review_output` names describe transport state only. They do not assign a
+reviewer role to Codex. Web GPT + DS retain planning, architecture, execution
+direction, review/audit, repair, C/P, and authorized I/W authority; Codex only
+executes the bounded instruction and reports progress/results/problems.
+
 ### Optional read-only task observer
 
 Bridge can expose the same bounded task activity to a local observer without
