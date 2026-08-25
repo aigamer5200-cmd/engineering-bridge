@@ -18,6 +18,7 @@ import { ManagedWorkspaceCatalog } from "./workspaces/managed-workspace-catalog.
 import { RegisteredWorkspaceRegistry } from "./workspaces/registered-workspace-registry.js";
 import { WorkspaceOnboardingService } from "./workspaces/workspace-onboarding-service.js";
 import { KnowledgePreflightReceiptSchema } from "./tasks/knowledge-preflight-receipt.js";
+import { createTaskObserver } from "./tasks/task-observer.js";
 
 const WorkspaceEntrySchema = z.object({
   id: z.string().min(1),
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
   const configPath = process.argv[2];
   if (configPath === undefined) throw new Error("Workspace configuration path is required.");
   const parsed = WorkspaceConfigSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+  const observer = createTaskObserver(configPath);
   const workspaceEntries = parsed.filter((entry): entry is WorkspaceEntry => !isProjectRootEntry(entry));
   const projectRootEntries = parsed.filter(isProjectRootEntry);
   for (const entry of projectRootEntries) {
@@ -94,7 +96,8 @@ async function main(): Promise<void> {
         case "dsh": return new DshExecutor(workspaceRoot);
       }
     },
-    executionReceipts
+    executionReceipts,
+    observer
   );
   const controlledPatches = new ControlledPatchService(
     registry,

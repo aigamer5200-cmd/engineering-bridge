@@ -168,6 +168,14 @@ Reconnect the integration and confirm these nine current V1 tools are visible:
 
 Ordinary `run_task` is always read-only (with an optional `executor: "codex" | "dsh"`, default `codex`) and returns a task ID on success. The V1 interactive supervision order is: `run_task` → `waiting_for_supervisor_review` → inspect the result/evidence → use `control_task` with `continue`, `steer`, `interrupt`, or `accept`; this is the core V1 change over the older one-shot task/result flow. Poll `task_result`: non-interactive tasks report `ready: false` while queued or running, then return `output` or a safe `error`. A successful interactive turn enters `waiting_for_supervisor_review`; its result exposes state/readiness, bounded evidence, and pre-acceptance `review_output`. `task_result` also reports the fixed `executor`; Codex tasks return the real native `thread_id` once one exists, while DSH tasks never get a fabricated `thread_id` because the headless interface has no machine-resumable session seam (a DSH `continue` is a new execution). `control_task` accepts only interactive `run_task` task IDs: `continue` preserves native Codex thread continuity, `interrupt` applies only while an interactive task is running and ends it as failed (if the executor genuinely produced partial output, `task_result` returns it as `partial_output` while the state stays failed), and only finalization exposes final `output` or `error` through `task_result`. Verify the workspace yourself:
 
+For local visibility without creating a second controller, set
+`ENGINEERING_BRIDGE_OBSERVER_MODE=log` or `window` before starting Bridge. The
+optional observer writes a bounded `<workspaces-config>.observer.log`; `window`
+also opens one read-only PowerShell tail window on Windows. It shows task state,
+executor, Codex thread id, bounded commands, and changed file paths, but never
+logs full prompts or diff bodies and cannot steer, interrupt, accept, continue,
+or otherwise control a task. The default is off.
+
 ```sh
 git -C /absolute/path/to/my-project status --short
 ```
