@@ -8,3 +8,4 @@ var/
 *.log
 .DS_Store
 *.tsbuildinfo
+.local/

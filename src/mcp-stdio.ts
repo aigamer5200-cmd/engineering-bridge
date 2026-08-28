@@ -109,21 +109,27 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction without granting extra authority. This tool does not modify workspace files.",
+    description: "Run a read-only task with the selected executor in a pre-registered workspace. For Codex only, web_research=true enables native live web_search while shell/OS network access remains disabled. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction without granting extra authority. This tool does not modify workspace files.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
       executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      web_research: z.boolean().optional().default(false),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, preflight_receipt }) => {
-    const { taskId } = service.startTask({
-      workspace_id,
-      instruction,
-      executor,
-      ...(preflight_receipt === undefined ? {} : { preflight_receipt })
-    });
-    return jsonContent({ task_id: taskId });
+  }, ({ workspace_id, instruction, executor, web_research, preflight_receipt }) => {
+    try {
+      const { taskId } = service.startTask({
+        workspace_id,
+        instruction,
+        executor,
+        ...(web_research ? { web_research: true } : {}),
+        ...(preflight_receipt === undefined ? {} : { preflight_receipt })
+      });
+      return jsonContent({ task_id: taskId });
+    } catch (error) {
+      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+    }
   });
 
   server.registerTool("task_result", {

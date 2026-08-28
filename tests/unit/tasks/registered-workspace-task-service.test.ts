@@ -695,6 +695,22 @@ test("DSH taskView reports executor dsh without fabricating a thread id, across 
   assert.equal(service.taskView(taskId)?.threadId, undefined);
 });
 
+test("web research is Codex-only and fails closed for DSH", () => {
+  const service = new RegisteredWorkspaceTaskService(registry(), () => ({
+    execute: async () => ({ kind: "completed", output: "unused" })
+  }));
+
+  assert.throws(
+    () => service.startTask({
+      workspace_id: "known",
+      instruction: "research",
+      executor: "dsh",
+      web_research: true
+    }),
+    (error: unknown) => error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+  );
+});
+
 test("thread id is omitted while the native thread does not exist yet", async () => {
   const pending = deferred<ExecutorResult>();
   const executor: Executor = { execute: () => pending.promise };

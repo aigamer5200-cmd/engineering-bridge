@@ -1,5 +1,13 @@
 # Release notes
 
+## Unreleased — bounded Codex live web research
+
+- `run_task` accepts optional `web_research: true` for the Codex executor only.
+- The option enables Codex native live Responses `web_search` while preserving the existing read-only workspace sandbox and `networkAccess: false` OS/shell boundary.
+- DSH rejects `web_research: true` instead of silently widening its execution mode.
+- Live-provider validation confirmed public web research works through the native tool without enabling shell networking.
+- This change grants research capability only. It does not grant write, upload, POST, credential, browser-control, deployment, or deletion authority.
+
 ## v1.2.1-biaogu.4 (custom fork)
 
 This custom build promotes the read-only Shoestring GOAL Codex Observer already

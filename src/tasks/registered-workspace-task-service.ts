@@ -17,10 +17,19 @@ export interface RegisteredWorkspaceTaskRequest {
   readonly workspace_id: string;
   readonly instruction: string;
   readonly executor?: ExecutorName;
+  readonly web_research?: boolean;
   readonly preflight_receipt?: KnowledgePreflightReceipt;
 }
 
 type NormalizedRegisteredWorkspaceTaskRequest = RegisteredWorkspaceTaskRequest & { readonly executor: ExecutorName };
+
+function normalizeTaskRequest(request: RegisteredWorkspaceTaskRequest): NormalizedRegisteredWorkspaceTaskRequest {
+  const executor = request.executor ?? "codex";
+  if (request.web_research === true && executor !== "codex") {
+    throw new CoreError("UNSUPPORTED_ACTION");
+  }
+  return { ...request, executor };
+}
 
 export type RegisteredWorkspaceTaskResult =
   | {
@@ -122,7 +131,7 @@ export class RegisteredWorkspaceTaskService {
     receiptOperation?: ExecutionReceiptOperation
   ): { taskId: Id } {
     const taskId = newId();
-    const normalizedRequest = { ...request, executor: request.executor ?? "codex" };
+    const normalizedRequest = normalizeTaskRequest(request);
     this.tasks.set(taskId, { state: "queued", executor: normalizedRequest.executor });
     this.observeState(taskId, normalizedRequest.executor, "queued");
     queueMicrotask(() => void this.run(
@@ -183,7 +192,7 @@ export class RegisteredWorkspaceTaskService {
 
   startTask(request: RegisteredWorkspaceTaskRequest): { taskId: Id } {
     const taskId = newId();
-    const normalizedRequest = { ...request, executor: request.executor ?? "codex" };
+    const normalizedRequest = normalizeTaskRequest(request);
     this.interactive.set(taskId, { state: "queued", request: normalizedRequest, evidence: [] });
     this.observeState(taskId, normalizedRequest.executor, "queued");
     queueMicrotask(() => void this.executeInteractive(taskId));
@@ -321,6 +330,7 @@ export class RegisteredWorkspaceTaskService {
       });
       const result = await executor.execute({ taskId, instruction,
         sandbox: "read-only", threadId: record.threadId,
+        ...(record.request.web_research === true ? { webSearch: "live" as const } : {}),
         onEvidence: (items) => {
           record.evidence = items;
           this.observeEvidence(taskId, record.request.executor, items);
@@ -388,10 +398,15 @@ export class RegisteredWorkspaceTaskService {
       });
       const result = await executor.execute(
         this.observer === undefined
-          ? { taskId, instruction }
+          ? {
+            taskId,
+            instruction,
+            ...(request.web_research === true ? { webSearch: "live" as const } : {})
+          }
           : {
             taskId,
             instruction,
+            ...(request.web_research === true ? { webSearch: "live" as const } : {}),
             onEvidence: (items) => this.observeEvidence(taskId, request.executor, items)
           }
       );

@@ -169,6 +169,38 @@ test("uses the fixed safe invocation and returns agent text", async () => {
   assert.equal(invocation.args.includes(instruction), false);
 });
 
+test("live web research enables native web_search without enabling OS network", async () => {
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
+    appServerOutput: "research answer"
+  }, invocations), {});
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "research only",
+    webSearch: "live"
+  });
+
+  assert.equal(result.kind, "completed");
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(messages[2], {
+    id: 2,
+    method: "thread/start",
+    params: {
+      cwd: TRUSTED_CWD,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      config: { web_search: "live" }
+    }
+  });
+  assert.deepEqual(messages[3].params.sandboxPolicy, {
+    type: "readOnly",
+    networkAccess: false
+  });
+});
+
 test("steer requires turn/started readiness and controls reset between turns", async () => {
   const invocations: Invocation[] = [];
   const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), {});

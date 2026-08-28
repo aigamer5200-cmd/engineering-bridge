@@ -63,6 +63,9 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
       const inputSchema = tool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
       assert.equal(typeof inputSchema?.properties?.preflight_receipt, "object");
     }
+    const runTaskTool = listed.tools.find(({ name }) => name === "run_task");
+    const runTaskSchema = runTaskTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+    assert.equal(typeof runTaskSchema?.properties?.web_research, "object");
 
     const result = await client.callTool({
       name: "generate_controlled_patch",

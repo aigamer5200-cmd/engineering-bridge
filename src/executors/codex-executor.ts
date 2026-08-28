@@ -335,6 +335,12 @@ export class CodexExecutor implements Executor {
       this.notify("initialized", {});
       const sandbox = request.sandbox ?? "read-only";
       const threadParams: Record<string, unknown> = { cwd: this.workspaceRoot, approvalPolicy: "never", sandbox };
+      if (request.webSearch === "live") {
+        // Native Codex web_search is a model tool, not shell/network access.
+        // Keep the OS sandbox network boundary disabled below; this config only
+        // enables the first-party live web search surface for read-only research.
+        threadParams.config = { web_search: "live" };
+      }
       if (request.threadId) threadParams.threadId = request.threadId;
       const threadResult = await this.call(request.threadId ? "thread/resume" : "thread/start", threadParams);
       if (!object(threadResult) || !object(threadResult.thread) || typeof threadResult.thread.id !== "string") throw new Error();
