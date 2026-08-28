@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased — bounded Codex live web research
+## v1.2.1-biaogu.5 (custom fork) — bounded Codex live web research
 
 - `run_task` accepts optional `web_research: true` for the Codex executor only.
 - The option enables Codex native live Responses `web_search` while preserving the existing read-only workspace sandbox and `networkAccess: false` OS/shell boundary.
