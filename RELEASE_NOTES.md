@@ -1,5 +1,23 @@
 # Release notes
 
+## GOAL v3.1 source-alignment note (2026-08-30)
+
+- Task-local Bridge/Codex failures now distinguish seamless recovery from a
+  real execution stop: safe retry/fallback that keeps user-visible forward
+  progress continuous discards only the stale task/thread/child, preserves
+  healthy sibling tasks, keeps the Codex executor lane, and does not emit an
+  interruption Telegram or create a Human Gate. Telegram remains mandatory
+  when forward execution actually stops or yields before recovery.
+- Ordinary isolated-worktree Lane A/B mutation prefers project-authorized DS
+  `apply_patch`; Bridge controlled `APPLY` remains available only where the
+  project explicitly authorizes that lane, and the confirmation token itself
+  does not manufacture a Human Gate.
+- Parallel 2-4 Codex child fan-out remains an upper-layer Shoestring GOAL
+  orchestration decision; Bridge stays the formal entry/provenance transport
+  for each bounded Codex child and does not acquire reducer/reviewer authority.
+- This is source/recovery-handoff alignment only. It does not deploy or mutate
+  any production Bridge runtime or control copy.
+
 ## v1.2.1-biaogu.5 (custom fork) — bounded Codex live web research
 
 - `run_task` accepts optional `web_research: true` for the Codex executor only.

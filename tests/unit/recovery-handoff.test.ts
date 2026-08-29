@@ -26,7 +26,13 @@ test("recovery handoff freezes the reason-agnostic GOAL Telegram stop rule", () 
   assert.match(watchdog, /Do not use DS exec_command/u);
   assert.match(watchdog, /task-local recoverable failure/u);
   assert.match(watchdog, /keep executor_mode=codex/u);
-  assert.match(watchdog, /requires DS apply_patch for writes/u);
+  assert.match(watchdog, /keep user-visible forward progress continuous/u);
+  assert.match(watchdog, /discard only the stale task\/thread\/child/u);
+  assert.match(watchdog, /preserve healthy sibling tasks/u);
+  assert.match(watchdog, /without Telegram or a Human Gate/u);
+  assert.match(watchdog, /only when forward execution actually stops or yields before recovery/u);
+  assert.match(watchdog, /DS apply_patch is the preferred mutation lane/u);
+  assert.match(watchdog, /APPLY confirmation token by itself must not manufacture a Human Gate/u);
   assert.match(watchdog, /Only actual exhaustion of both providers/u);
   assert.match(watchdog, /codex-failure transition/u);
   assert.match(watchdog, /single task-local stall must never advance the provider chain/u);

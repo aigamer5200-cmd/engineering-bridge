@@ -91,9 +91,9 @@ Engineering Bridge 是一个在你电脑上运行的小型“工程桥梁”。�
 
 - **Codex：** 安装并认证官方 `codex` CLI，使其可从 `PATH` 调用。Windows 建议使用 `npm i -g @openai/codex` 的全局 npm 安装作为稳定主提供者；如果 PATH 同时可见有效的 global npm Codex 与其他 `codex.exe`，Bridge 会优先 global npm package，其他 executable 只作为 fallback。Bridge 以 `codex app-server --stdio` 启动 Codex：不经过 shell，approval 为 `never`，网络禁用。
 
-在 Shoestring GOAL 集成中，**正式 Codex bounded task 只能从 Engineering Bridge 进入**。DS/PowerShell/CMD 直跑 Codex CLI 只允许做版本、路径或 resolver 诊断，不能承载正式 implementation/review prompt。单一 task/thread 的 stdin/EOF、内部 multi-agent/memory、Windows sandbox/SID/Git ownership 或项目写入权限冲突属于 task-local recovery：丢弃旧 task/thread、保留 Codex executor、重开新的 Bridge task。只有 global npm + bundled provider 都不可用，或 token/capacity 不可用，才进入上层 executor fallback。
+在 Shoestring GOAL 集成中，**正式 Codex bounded task 只能从 Engineering Bridge 进入**。DS/PowerShell/CMD 直跑 Codex CLI 只允许做版本、路径或 resolver 诊断，不能承载正式 implementation/review prompt。单一 task/thread 的 stdin/EOF、内部 multi-agent/memory、Windows sandbox/SID/Git ownership 或项目写入权限冲突属于 task-local recovery：如果 safe retry 能让 user-visible forward progress 无缝继续，只丢弃 stale task/thread/child、保留健康 sibling tasks 与 Codex executor，并重开新的 Bridge task，**不发 Telegram、也不建立 Human Gate**。只有 forward execution 真的停止或 yield 才需要 interruption TG。只有 global npm + bundled provider 都不可用，或 token/capacity 不可用，才进入上层 executor fallback。
 
-Bridge 的 controlled patch 能力不覆盖项目自己的更严格写入规则。如果项目规定 repo mutation 必须由 DS `apply_patch`，Codex/Bridge 只产生 read-only proposal，DS 负责应用与独立 regression；只有项目明确许可 Bridge controlled-write 时才使用 exact `APPLY`。
+Bridge 的 controlled patch 能力不覆盖项目自己的更严格写入规则。一般 isolated-WT Lane A/B 工作优先由 DS `apply_patch` 落地，除非项目明确授权 Bridge controlled-write；Codex/Bridge 可只产生 read-only proposal，DS 负责应用与独立 regression。只有项目明确许可 Bridge controlled-write 时才使用 exact `APPLY`，而 `APPLY` token 本身不能制造 Human Gate。
 - **DSH：** 安装官方 npm 包 `@deepseek-ai/dsh`；`dsh` 可从 `PATH` 调用，或由 Bridge 经 `DSH_HOME`/`~/.dsh` 的 profiles 回退路径找到。若 Bridge 运行环境的环境变量中设置了 `DEEPSEEK_API_KEY`，Bridge 会将其转发给 DSH——这是 Bridge 转发的唯一凭据环境变量；密钥不要写进配置文件（见第 4 节）。Bridge 以 `dsh --profile headless <指令>` 启动 DSH，并自行固定 `DSH_PERMISSION_MODE=read-only`——请勿自行设置该变量。`DSH_TOOLS_MODE` 是可选透传；proxy 变量不会转发。
 
 ### 2. Clone、安装与构建

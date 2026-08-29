@@ -18,14 +18,22 @@ must distinguish task-local stalls from provider failure: a stale task/thread,
 stdin/EOF wrapper issue, internal Codex delegation/memory stall, Windows
 sandbox/SID/Git-ownership friction, or project write-authority conflict causes a
 fresh Bridge task while keeping the Codex executor lane. It does not justify
-advancing from global npm to bundled or from Codex to another executor.
+advancing from global npm to bundled or from Codex to another executor. Under
+GOAL v3.1, when that retry/fallback can keep user-visible forward progress
+continuous, the recovery is seamless: only the stale task/thread/child is
+discarded, healthy sibling tasks continue, and no Telegram interruption or
+Human Gate is created. Telegram is required only when forward execution really
+stops or yields before recovery.
 
 Repository mutation authority is deliberately outside Bridge provider
 selection. `generate_controlled_patch` and `refine_controlled_patch` remain
 read-only. `apply_controlled_patch` remains a generic exact-`APPLY` capability,
 but a project may impose a stricter DS-only mutation rule; in that case the
 proposal is applied by the project-authorized DS path and independently
-regressed there.
+regressed there. For ordinary isolated-worktree Lane A/B work, DS `apply_patch`
+is the preferred mutation lane unless the target project explicitly authorizes
+Bridge controlled writes; the existence of Bridge's exact `APPLY` token does
+not create a Human Gate by itself.
 
 Bridge provider selection is only the Codex layer of the wider Shoestring GOAL continuity chain. The orchestrator treats `CODEX_UNAVAILABLE` after the allowed provider fallback (and equivalent Codex-capacity unavailability) as a recoverable executor interruption when DS remains available: Telegram is emitted through the shared GOAL runtime, executor mode is switched durably to `web-gpt-ds`, and the same frozen GOAL continues under Web GPT direction with DS execution. Bridge itself does not invoke DevSpace or silently replace Codex with DS; that third-tier routing decision remains in the authoritative GOAL orchestration layer.
 
