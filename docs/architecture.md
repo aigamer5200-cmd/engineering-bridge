@@ -25,6 +25,19 @@ discarded, healthy sibling tasks continue, and no Telegram interruption or
 Human Gate is created. Telegram is required only when forward execution really
 stops or yields before recovery.
 
+GOAL V3.2 Harness Lite does not change Engineering Bridge Core or add a second
+Bridge transport. It is an optional Shoestring GOAL control layer that composes
+the existing `run_task` / `task_result` / `control_task` contract with durable
+Task Graph state, Task→Worker bindings, execution receipts, separate Web GPT/DS
+verification receipts, retry history, convergence, and resume projection. The
+existing V3.1 WorkerRegistry/ResourceScheduler remains worker/resource
+authority, and Bridge remains the single formal Codex execution entrypoint.
+Bridge ready/completed execution provenance is still executor evidence only:
+Harness may mark a task `COMPLETED` and unlock dependents only after independent
+Web GPT + DS verification records PASS. Harness disable/failure must fall back
+to unchanged V3.1 execution semantics and must not grant write, Human Gate,
+C/P, I/W, deploy, or production authority.
+
 Repository mutation authority is deliberately outside Bridge provider
 selection. `generate_controlled_patch` and `refine_controlled_patch` remain
 read-only. `apply_controlled_patch` remains a generic exact-`APPLY` capability,
