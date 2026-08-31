@@ -22,7 +22,17 @@ advancing from global npm to bundled or from Codex to another executor. Under
 GOAL v3.1, when that retry/fallback can keep user-visible forward progress
 continuous, the recovery is seamless: only the stale task/thread/child is
 discarded, healthy sibling tasks continue, and no Telegram interruption or
-Human Gate is created. Telegram is required only when forward execution really
+Human Gate is created. This is only because the user-visible task never stops.
+Once development execution has started, any real stop/yield requires Telegram
+first regardless of normal/abnormal, success/failure, recoverability, or
+system/Owner cause. GOAL-managed stop delivery is fail-closed: stop commands
+are successful only with `telegram_status=delivered`,
+`STOP_AND_NOTIFY_REQUIRED` remains non-success until a real notification
+transition completes, and no `--no-telegram` bypass is allowed. Automated
+non-GOAL callers use the canonical Shoestring stop notifier with a stable
+EventId. Any Bridge notification helper remains notification-only and grants no
+workspace/Codex/GOAL/write/C/P/I/W/deploy/production/Human-Gate authority.
+Telegram is required when forward execution really
 stops or yields before recovery.
 
 GOAL V3.2 Harness Lite does not change Engineering Bridge Core or add a second
