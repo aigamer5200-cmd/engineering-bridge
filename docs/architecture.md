@@ -48,6 +48,17 @@ Web GPT + DS verification records PASS. Harness disable/failure must fall back
 to unchanged V3.1 execution semantics and must not grant write, Human Gate,
 C/P, I/W, deploy, or production authority.
 
+For the Owner's GOAL-managed Windows profile, Bridge also inherits the global
+Worktree location boundary: **every new GOAL worktree must live under
+`D:\WORKTREE_ZONE`, and that path is the only authorized GOAL `project_root`.**
+Bridge/managed-onboarding failure does not authorize Web GPT, DS, Codex, or an
+operator workflow to try repo-local/sibling directories, `C:\`, Temp, another
+drive, or any alternate Worktree root. Recovery must repair/reuse a clean WT
+inside `D:\WORKTREE_ZONE` or surface the real blocker. Existing out-of-Zone
+registrations/worktrees are legacy only and must not be selected for new GOAL
+tasks. This is a GOAL profile constraint layered on Bridge's generic
+`project_root` mechanism; it does not broaden Bridge authority.
+
 Repository mutation authority is deliberately outside Bridge provider
 selection. `generate_controlled_patch` and `refine_controlled_patch` remain
 read-only. `apply_controlled_patch` remains a generic exact-`APPLY` capability,

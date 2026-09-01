@@ -113,6 +113,7 @@ V1 稳定版（`v1.2.1`）没有一键安装器。
 
 - **手动登记（权威）：** 在 `workspaces.json` 中填入项目的绝对、规范化路径；该文件是可信的本机配置，MCP 调用方只能选择 ID。
 - **受管登记（onboarding）：** 在 `workspaces.json` 中配置 `project_root`（批准根目录的信任边界），然后通过 `bind_project`（精确 `BIND`）绑定已有目录，或通过 `create_project`（精确 `CREATE`）创建并 `git init` 新目录。受管工作区默认只读，并持久化到 `<config>.managed-workspaces.json`。
+- **GOAL Windows 固定边界：** Owner 的 GOAL-managed 工作流把 `D:\WORKTREE_ZONE` 写死为唯一合法的 Worktree `project_root`。新 GOAL WT 不得建在主 repo 内/旁、`C:\`、Temp、其他磁盘或任何 fallback root；Zone 建立失败只修 Zone、重用干净 Zone WT，或回报真正 blocker。历史 out-of-Zone WT 不再用于新 GOAL task。
 
 ```json
 [

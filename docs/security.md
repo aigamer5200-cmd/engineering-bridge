@@ -24,6 +24,13 @@ This document separates enforced behavior from operating assumptions for the Eng
 
 Manual registrations are authoritative: the trusted operator controls `workspaces.json`, and MCP callers can select IDs but cannot add or replace manual entries. Managed onboarding is confined to configured `project_root` approved roots: candidate paths are canonicalized with `realpath`, must equal or be contained by an approved root (fail closed otherwise), and `bind_project`/`create_project` require exact `BIND`/`CREATE` confirmation. Managed workspaces start read-only; only exact `AUTHORIZE` grants controlled-write permission, persisted first and applied at runtime. Controlled writes also require the configured root to be a clean Git top-level and recorded base; on filesystems with path aliases, canonical real paths are compared so aliases to the same directory are accepted without treating a genuine subdirectory or different directory as the Git top-level.
 
+In the Owner's GOAL-managed Windows deployment, the approved Worktree
+`project_root` is fixed to **`D:\WORKTREE_ZONE` only**. New GOAL task WTs outside
+that root are fail-closed and must not be made acceptable by adding a broader
+root, trying another drive/path, or registering a legacy out-of-Zone WT. A
+creation/bind failure is repaired inside the Zone or returned as a genuine
+blocker; alternate-root fallback is forbidden.
+
 The human reviewer must inspect every path and hunk in a proposal before supplying exact `APPLY`. A filename mentioned in a natural-language request is not a semantic file allowlist enforced by the code. Supervisor `accept` accepts read-only task output; it is distinct from `apply_controlled_patch` and does not write files.
 
 ## Persistence boundary
