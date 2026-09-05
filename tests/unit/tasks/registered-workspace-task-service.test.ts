@@ -711,6 +711,36 @@ test("web research is Codex-only and fails closed for DSH", () => {
   );
 });
 
+test("Codex account routing is task-scoped, observable, and rejected for DSH", async () => {
+  const calls: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      calls.push(request);
+      return { kind: "completed", output: "done" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "account scoped",
+    executor: "codex",
+    account: "B"
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  assert.equal(service.taskView(taskId)?.account, "B");
+  assert.equal(calls[0]?.account, "B");
+  assert.throws(
+    () => service.startTask({
+      workspace_id: "known",
+      instruction: "bad account",
+      executor: "dsh",
+      account: "B"
+    }),
+    (error: unknown) => error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+  );
+});
+
 test("thread id is omitted while the native thread does not exist yet", async () => {
   const pending = deferred<ExecutorResult>();
   const executor: Executor = { execute: () => pending.promise };

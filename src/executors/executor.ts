@@ -18,6 +18,12 @@ export interface ExecutorRequest {
   readonly instruction: string;
   readonly sandbox?: SandboxMode;
   readonly model?: string;
+  /**
+   * Optional GOAL-owned Codex account/profile alias. Omitted keeps the exact
+   * native Codex path. This is transport selection only and grants no extra
+   * repository/workspace authority.
+   */
+  readonly account?: string;
   readonly webSearch?: "live";
   readonly threadId?: string | undefined;
   readonly onEvidence?: (evidence: readonly ExecutorEvidence[]) => void;

@@ -18,6 +18,7 @@ export interface RegisteredWorkspaceTaskRequest {
   readonly instruction: string;
   readonly executor?: ExecutorName;
   readonly model?: string;
+  readonly account?: string;
   readonly web_research?: boolean;
   readonly preflight_receipt?: KnowledgePreflightReceipt;
 }
@@ -30,6 +31,9 @@ function normalizeTaskRequest(request: RegisteredWorkspaceTaskRequest): Normaliz
     throw new CoreError("UNSUPPORTED_ACTION");
   }
   if (request.model !== undefined && executor !== "codex") {
+    throw new CoreError("UNSUPPORTED_ACTION");
+  }
+  if (request.account !== undefined && executor !== "codex") {
     throw new CoreError("UNSUPPORTED_ACTION");
   }
   return { ...request, executor };
@@ -70,6 +74,9 @@ export interface ControlledTaskView {
   // Present only when the caller explicitly pinned a Codex model for this
   // task. Omitted means Codex owns default-model selection.
   readonly model?: string | undefined;
+  // Present only when an explicit Codex account/profile was requested. This
+  // is routing evidence, not authentication material.
+  readonly account?: string | undefined;
   // Present only for caller-submitted controlled patches: the proposal was
   // provided by the caller, not produced by an executor.
   readonly source?: "submitted" | undefined;
@@ -235,6 +242,7 @@ export class RegisteredWorkspaceTaskService {
       state: record.state,
       executor: record.request.executor,
       ...(record.request.model === undefined ? {} : { model: record.request.model }),
+      ...(record.request.account === undefined ? {} : { account: record.request.account }),
       evidence: record.evidence,
       ...(record.threadId === undefined ? {} : { threadId: record.threadId })
     };
@@ -339,6 +347,7 @@ export class RegisteredWorkspaceTaskService {
       const result = await executor.execute({ taskId, instruction,
         sandbox: "read-only", threadId: record.threadId,
         ...(record.request.model === undefined ? {} : { model: record.request.model }),
+        ...(record.request.account === undefined ? {} : { account: record.request.account }),
         ...(record.request.web_research === true ? { webSearch: "live" as const } : {}),
         onEvidence: (items) => {
           record.evidence = items;
@@ -411,12 +420,14 @@ export class RegisteredWorkspaceTaskService {
             taskId,
             instruction,
             ...(request.model === undefined ? {} : { model: request.model }),
+            ...(request.account === undefined ? {} : { account: request.account }),
             ...(request.web_research === true ? { webSearch: "live" as const } : {})
           }
           : {
             taskId,
             instruction,
             ...(request.model === undefined ? {} : { model: request.model }),
+            ...(request.account === undefined ? {} : { account: request.account }),
             ...(request.web_research === true ? { webSearch: "live" as const } : {}),
             onEvidence: (items) => this.observeEvidence(taskId, request.executor, items)
           }
@@ -526,6 +537,7 @@ export class RegisteredWorkspaceTaskService {
       workspaceId: request.workspace_id,
       workspaceRoot,
       executor: "codex",
+      ...(request.account === undefined ? {} : { account: request.account }),
       operation,
       readOnly: true,
       state

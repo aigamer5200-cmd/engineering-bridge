@@ -109,22 +109,24 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. For Codex only, model may pin an explicit Codex model for this task/thread and web_research=true enables native live web_search while shell/OS network access remains disabled. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction without granting extra authority. This tool does not modify workspace files.",
+    description: "Run a read-only task with the selected executor in a pre-registered workspace. For Codex only, model may pin an explicit Codex model, account may select an optional GOAL-managed codex-switch profile alias, and web_research=true enables native live web_search while shell/OS network access remains disabled. Omitting account preserves the exact native Codex path. An optional bounded Knowledge Preflight Receipt is prepended without granting extra authority. This tool does not modify workspace files.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
       executor: z.enum(["codex", "dsh"]).optional().default("codex"),
       model: z.string().trim().min(1).max(200).optional(),
+      account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
       web_research: z.boolean().optional().default(false),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, web_research, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, account, web_research, preflight_receipt }) => {
     try {
       const { taskId } = service.startTask({
         workspace_id,
         instruction,
         executor,
         ...(model === undefined ? {} : { model }),
+        ...(account === undefined ? {} : { account }),
         ...(web_research ? { web_research: true } : {}),
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
       });
@@ -149,6 +151,7 @@ async function main(): Promise<void> {
       ...(view.source === undefined ? {} : { source: view.source }),
       ...(view.executor === undefined ? {} : { executor: view.executor }),
       ...(view.model === undefined ? {} : { model: view.model }),
+      ...(view.account === undefined ? {} : { account: view.account }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
       ...(view.output === undefined ? {} : { output: view.output }),
@@ -161,6 +164,7 @@ async function main(): Promise<void> {
           workspace_root: receipt.workspaceRoot,
           task_id: receipt.taskId,
           executor: receipt.executor,
+          ...(receipt.account === undefined ? {} : { account: receipt.account }),
           operation: receipt.operation,
           read_only: receipt.readOnly,
           state: receipt.state,

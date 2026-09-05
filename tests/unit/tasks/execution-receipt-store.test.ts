@@ -70,6 +70,22 @@ test("persists only bounded provenance fields and survives reload", async () => 
   assert.equal(restored.get(taskId)?.state, "completed");
 });
 
+test("persists optional Codex account identity without credential material", async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipts-account-")), "receipts.json");
+  const store = new ExecutionReceiptStore(statePath);
+  const taskId = newId();
+  await store.record({ ...receipt(taskId), account: "A" });
+
+  assert.equal(store.get(taskId)?.account, "A");
+  const raw = readFileSync(statePath, "utf8");
+  assert.match(raw, /"account": "A"/);
+  assert.doesNotMatch(raw, /auth\.json|refresh_token|access_token/);
+
+  const restored = new ExecutionReceiptStore(statePath);
+  await restored.load();
+  assert.equal(restored.get(taskId)?.account, "A");
+});
+
 test("retains only the newest 500 valid receipts after load and next persist", async () => {
   const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipts-cap-")), "receipts.json");
   const taskIds = Array.from({ length: 505 }, () => newId());

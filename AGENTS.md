@@ -30,16 +30,22 @@ Canonical authority：
 
 - account router 是 GOAL optional capability，不是 Bridge lifecycle / task authority；
 - module disabled/absent/unhealthy/rollback 時，Bridge 既有 native Codex path 必須仍可用；
-- 未來若 Bridge contract 增加 profile/account input，必須 explicit、task-scoped、可觀察，
-  omitted 時完整保留 current default behavior；
+- Current feature implementation 已加入 Codex-only `account` input；必須 explicit、
+  task-scoped、可觀察，omitted 時完整保留 current default behavior；
 - account/profile selection 不增加 workspace、repo write、C/P、I/W、deploy、production、
   Browser/Desktop、Human-Gate 或 delete authority；
 - plug-in 自身更新由 GOAL modular policy 管理：`candidate -> validation -> current`，保留
   `previous` / last-known-good；bad candidate 不得直接覆蓋 active module；
 - credential/profile secret 不得進 Bridge repo、config examples、logs、execution receipts。
+- account-routed process 必須同時使用 dedicated `CODEX_SWITCH_HOME` + dedicated
+  `CODEX_HOME`；不得把 optional multi-account plug-in 指向 Owner native `~/.codex`。
 
-Current Bridge API **尚未**把 account/profile selector 宣告為已實作功能；不得因這份治理
-文件把 planned architecture 誤報成 runtime capability。
+Current first slice 只接受 explicit alias（例如 A/B）。Alias 必須通過 GOAL-provided
+allowlist；指定 account 才載入 optional `xjoker/codex-switch` adapter。`AUTO` 目前
+fail-closed，不得靜默挑選一個無法在 dispatch/receipt 證明的 account。
+
+這仍是 feature-WT implementation，必須完成 normal C/P + Owner I/W 後才可稱為 current
+production Bridge behavior；A/B OAuth/device-code profile onboarding 另屬 activation gate。
 
 Canonical authority：
 

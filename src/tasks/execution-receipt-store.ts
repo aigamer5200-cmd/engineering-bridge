@@ -16,6 +16,7 @@ export interface ExecutionReceiptRecord {
   readonly workspaceId: string;
   readonly workspaceRoot: string;
   readonly executor: "codex";
+  readonly account?: string;
   readonly operation: ExecutionReceiptOperation;
   readonly readOnly: true;
   readonly state: ExecutionReceiptState;
@@ -84,6 +85,7 @@ export class ExecutionReceiptStore {
         workspaceId: input.workspaceId,
         workspaceRoot: input.workspaceRoot,
         executor: input.executor,
+        ...(input.account === undefined ? {} : { account: input.account }),
         operation: input.operation,
         readOnly: input.readOnly,
         state: input.state,
@@ -143,6 +145,7 @@ export class ExecutionReceiptStore {
         workspace_id: record.workspaceId,
         workspace_root: record.workspaceRoot,
         executor: record.executor,
+        ...(record.account === undefined ? {} : { account: record.account }),
         operation: record.operation,
         read_only: record.readOnly,
         state: record.state,
@@ -186,6 +189,7 @@ function parseRecord(item: unknown): ExecutionReceiptRecord | undefined {
     workspaceId: item.workspace_id,
     workspaceRoot: item.workspace_root,
     executor: "codex",
+    ...(typeof item.account === "string" && item.account.length > 0 ? { account: item.account } : {}),
     operation: item.operation,
     readOnly: true,
     state: item.state,
@@ -208,6 +212,7 @@ function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boo
     a.workspaceId === b.workspaceId &&
     a.workspaceRoot === b.workspaceRoot &&
     a.executor === b.executor &&
+    a.account === b.account &&
     a.operation === b.operation &&
     a.readOnly === b.readOnly;
 }

@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "n
 import { CoreError, serializeError } from "../core/errors.js";
 import { VERSION } from "../version.js";
 import { resolveCommand } from "./command-resolution.js";
+import { resolveCodexAccountLaunch } from "./codex-account-router.js";
 import {
   DEFAULT_EXECUTOR_TIMING,
   signalExecution,
@@ -27,7 +28,7 @@ const CODEX_NODE_TARGET = ["@openai", "codex", "bin", "codex.js"] as const;
 // entries that make list and count truncation visible.
 const TRUNCATION_MARKER = "[truncated]";
 
-function failure(code: "CODEX_UNAVAILABLE" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED"): ExecutorResult {
+function failure(code: "CODEX_UNAVAILABLE" | "CODEX_ACCOUNT_UNAVAILABLE" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED"): ExecutorResult {
   return { kind: "failed", error: serializeError(new CoreError(code)) };
 }
 function failedTurn(turn: Record<string, unknown>): ExecutorResult {
@@ -77,10 +78,17 @@ export class CodexExecutor implements Executor {
     this.turnId = undefined;
     this.startedTurnId = undefined;
     let child: ChildProcessWithoutNullStreams;
+    let accountRouted = false;
     try {
+      const accountLaunch = resolveCodexAccountLaunch(request.account, this.hostEnvironment);
+      accountRouted = accountLaunch !== undefined;
+      const childEnvironment = environment(this.hostEnvironment);
+      if (accountLaunch !== undefined) {
+        Object.assign(childEnvironment, accountLaunch.environmentOverlay);
+      }
       const options: SpawnOptionsWithoutStdio = {
         cwd: this.workspaceRoot, shell: false, stdio: ["pipe", "pipe", "pipe"],
-        detached: this.platform !== "win32", env: environment(this.hostEnvironment)
+        detached: this.platform !== "win32", env: childEnvironment
       };
       // Windows: a valid global npm Codex installation is the primary provider
       // even when a VS Code-bundled codex.exe is also visible on PATH. The
@@ -91,20 +99,29 @@ export class CodexExecutor implements Executor {
       // user instruction travels over stdin, never through the command line.
       // Everywhere else (and as the Windows final fallback) the original bare
       // "codex" spawn is unchanged.
-      const resolved = resolveCommand(this.hostEnvironment, "codex", {
-        nodeTarget: CODEX_NODE_TARGET,
-        preferGlobalNodeShim: true,
-        platform: this.platform
-      });
-      if (resolved.kind === "direct") {
-        child = this.startProcess(resolved.executable, ["app-server", "--stdio"], options);
-      } else if (resolved.kind === "node-launcher") {
-        child = this.startProcess(process.execPath, [resolved.scriptPath, "app-server", "--stdio"], options);
+      if (accountLaunch !== undefined) {
+        child = this.startProcess(accountLaunch.executable, accountLaunch.args, options);
       } else {
-        child = this.startProcess("codex", ["app-server", "--stdio"], options);
+        const resolved = resolveCommand(this.hostEnvironment, "codex", {
+          nodeTarget: CODEX_NODE_TARGET,
+          preferGlobalNodeShim: true,
+          platform: this.platform
+        });
+        if (resolved.kind === "direct") {
+          child = this.startProcess(resolved.executable, ["app-server", "--stdio"], options);
+        } else if (resolved.kind === "node-launcher") {
+          child = this.startProcess(process.execPath, [resolved.scriptPath, "app-server", "--stdio"], options);
+        } else {
+          child = this.startProcess("codex", ["app-server", "--stdio"], options);
+        }
       }
       this.child = child;
-    } catch { return failure("CODEX_UNAVAILABLE"); }
+    } catch (error) {
+      if (request.account !== undefined) {
+        return { kind: "failed", error: serializeError(error instanceof CoreError ? error : new CoreError("CODEX_ACCOUNT_UNAVAILABLE")) };
+      }
+      return failure("CODEX_UNAVAILABLE");
+    }
 
     const evidence = new Map<string, ExecutorEvidence>();
     let evidenceDropped = 0;
@@ -142,19 +159,28 @@ export class CodexExecutor implements Executor {
       // Every protocol terminal event ends this one-shot app-server, including
       // a cooperative interrupt completion. Settling the Bridge task must not
       // leave a detached process tree alive.
-      if (!killSignalled) {
-        if (directExited) {
-          signalProcessGroup(child, this.platform, "SIGTERM");
-          signalProcessGroup(child, this.platform, "SIGKILL");
-        } else {
-          signalExecution(child, this.platform, "SIGTERM");
-          signalExecution(child, this.platform, "SIGKILL");
+      if (accountRouted) {
+        // codex-switch owns a short stage -> startup-read -> auth restore
+        // transaction. Never TerminateProcess the wrapper on turn completion:
+        // that could strand the selected profile in live auth.json before its
+        // restore guard runs. Closing stdin gives the inherited app-server an
+        // EOF; the wrapper then finishes its restore and exits naturally.
+        child.stdin.end();
+      } else {
+        if (!killSignalled) {
+          if (directExited) {
+            signalProcessGroup(child, this.platform, "SIGTERM");
+            signalProcessGroup(child, this.platform, "SIGKILL");
+          } else {
+            signalExecution(child, this.platform, "SIGTERM");
+            signalExecution(child, this.platform, "SIGKILL");
+          }
+          killSignalled = true;
         }
-        killSignalled = true;
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
       }
-      child.stdin.destroy();
-      child.stdout.destroy();
-      child.stderr.destroy();
       terminal?.(result);
     };
     const stop = (result: ExecutorResult): void => {
@@ -164,7 +190,7 @@ export class CodexExecutor implements Executor {
       killSignalled = true;
       finish(result);
     };
-    const unavailable = (): void => stop(failure("CODEX_UNAVAILABLE"));
+    const unavailable = (): void => stop(failure(accountRouted ? "CODEX_ACCOUNT_UNAVAILABLE" : "CODEX_UNAVAILABLE"));
     // The evidence view a supervisor receives. Real evidence and the synthetic
     // evidence-drop marker together never exceed MAX_EVIDENCE: the marker only
     // appears once real entries were evicted, and the eviction loop above
@@ -191,8 +217,10 @@ export class CodexExecutor implements Executor {
         }
         : terminationResult ?? failure("CODEX_EXECUTION_FAILED");
     const forceKill = (): void => {
-      signalExecution(child, this.platform, "SIGKILL", !directExited);
-      killSignalled = true;
+      if (!accountRouted) {
+        signalExecution(child, this.platform, "SIGKILL", !directExited);
+        killSignalled = true;
+      }
       finish(currentTerminationResult());
     };
     const sendTerm = (): void => {

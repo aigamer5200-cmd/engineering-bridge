@@ -12,17 +12,36 @@ Engineering Bridge is a local STDIO MCP server with nine tools and a small layer
 On Windows, Codex provider selection is deliberately package-stable. When PATH exposes a valid global npm `codex.cmd` whose sibling `node_modules/@openai/codex/bin/codex.js` exists, `CodexExecutor` selects that official global npm installation before any directly spawnable `codex.exe` (for example a VS Code extension-bundled copy). The npm shim itself is never executed through `cmd.exe`; Bridge launches its resolved JavaScript target with `process.execPath`. If the global npm package is absent or incomplete, normal direct-executable resolution remains the fallback. Local `node_modules/.bin` shims are still supported, but they do not outrank a real executable merely because global-provider preference is enabled.
 
 Codex **account/profile routing is intentionally a separate concern from
-provider executable selection**. Shoestring GOAL has approved a future optional
-account-router integration based on an upstream-derived multi-account module,
-but Bridge Core must not hard-depend on that module. The current Bridge API does
-not yet expose an account/profile selector and this document must not be read as
-claiming that runtime feature exists today. If a later Bridge contract accepts a
-task-scoped account/profile selection, omission must preserve the current Codex
-behavior, the resolved profile identity must be observable, and module
-disable/absence/failure must retain the existing native Codex path. Account
-selection never expands workspace, repository-write, C/P, I/W, deployment,
-production, Human-Gate, or deletion authority. Credentials/profile secrets are
-not eligible for execution receipts or repository persistence.
+provider executable selection**. The optional task-scoped `account` field now
+exists behind a thin GOAL adapter. Omitting it preserves the existing native
+Codex behavior and does not load the plug-in. An explicit alias is validated
+against `ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST`, then the adapter starts
+the configured immutable upstream-derived module as:
+
+`codex-switch --json launch <alias> -- app-server --stdio`
+
+`--json` suppresses wrapper pre-launch chatter, leaving the inner Codex
+app-server as the active JSON-RPC stdout. The upstream launcher continues to own
+profile staging/restore and token-refresh handling; Bridge does not reimplement
+or persist auth material. On normal completion Bridge does not kill the wrapper
+before its restore guard can finish. The executable and profile-store root are
+supplied by GOAL through `ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE` and
+`ENGINEERING_BRIDGE_CODEX_SWITCH_HOME`. The account-routed child also receives a
+dedicated isolated `CODEX_HOME` from
+`ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME`; it must never use the
+Owner's native `~/.codex`, because upstream profile discovery/list behavior may
+auto-save the currently active native account.
+
+Task/result/receipt state may contain the non-secret requested alias so the
+supervisor can verify routing provenance. It never contains profile contents,
+`auth.json`, access/refresh tokens, cookies, or browser state. `AUTO` is
+intentionally unsupported in the first slice because the exact resolved account
+must be provable in dispatch evidence rather than guessed after execution.
+
+Account selection never expands workspace, repository-write, C/P, I/W,
+deployment, production, Human-Gate, or deletion authority. Missing/disabled
+plug-in state leaves every task that omits `account` on the unchanged native
+Codex path; an explicit account request fails closed if the router is unavailable.
 
 Shoestring GOAL treats Bridge as the single formal Codex entrypoint. A caller may
 use shell/DS execution for bounded provider diagnostics, but a formal Codex task

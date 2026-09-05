@@ -21,15 +21,23 @@ The receipt is delegation context, not an authority grant. It does not enable wr
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `web_research`, optional `preflight_receipt`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `account`, optional Codex-only `web_research`, optional `preflight_receipt`.
 
-Current contract note (2026-09-05): `run_task` does **not** yet expose a Codex
-account/profile selector. Shoestring GOAL has approved that capability as a
-future optional plug-in/router, but it must remain additive: an omitted/disabled
-router preserves the current native Codex path, and account/profile selection
-must not change any Bridge workspace/write/approval authority. Do not invent an
-`account` argument until a separately implemented and tested Bridge contract
-actually adds one.
+`account` is a task-scoped non-secret codex-switch profile alias. When omitted,
+Bridge uses the exact pre-existing native Codex path. When present, the alias
+must be included in the GOAL-provided account allowlist and the optional current
+codex-switch executable must be available; otherwise the account-routed task
+fails closed. `AUTO` is not accepted in the first slice. DSH plus `account`
+fails with `UNSUPPORTED_ACTION`.
+
+Account-routed tasks also require an absolute dedicated
+`ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME`. This isolation is separate
+from `ENGINEERING_BRIDGE_CODEX_SWITCH_HOME` and prevents the optional plug-in
+from importing or mutating the native Codex login/profile state.
+
+`task_result.account` and `execution_receipt.account` expose only the bounded
+routing identity for account-routed tasks. They never expose credentials and do
+not change sandbox/workspace/write/C/P/I/W/deployment/production authority.
 
 Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. For Codex, an explicit non-empty `model` is pinned when the native app-server thread starts and is reported in `task_result`; omitting it preserves Codex's existing default selection. DSH plus `model` fails closed, and Bridge does not silently substitute a different model. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 

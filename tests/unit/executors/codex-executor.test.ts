@@ -169,6 +169,64 @@ test("uses the fixed safe invocation and returns agent text", async () => {
   assert.equal(invocation.args.includes(instruction), false);
 });
 
+test("explicit Codex account routes through codex-switch while account omission stays native", async () => {
+  const invocations: Invocation[] = [];
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-account-"));
+  const switchExe = join(root, "codex-switch.exe");
+  const switchHome = join(root, "switch-home");
+  const isolatedCodexHome = join(root, "isolated-codex-home");
+  writeFileSync(switchExe, "stub");
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
+    appServerOutput: "account answer"
+  }, invocations), {
+    PATH: "/bin",
+    HOME: "/home/test",
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
+    ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
+    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
+  });
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "use A",
+    account: "A"
+  });
+
+  assert.equal(result.kind, "completed");
+  assert.equal(invocations.length, 1);
+  assert.equal(invocations[0]?.executable, switchExe);
+  assert.deepEqual(invocations[0]?.args, ["--json", "launch", "A", "--", "app-server", "--stdio"]);
+  assert.equal(invocations[0]?.options.env?.CODEX_SWITCH_HOME, switchHome);
+  assert.equal(invocations[0]?.options.env?.CODEX_HOME, isolatedCodexHome);
+  assert.deepEqual(invocations[0]?.signals, [], "codex-switch must restore staged auth instead of being killed on turn completion");
+});
+
+test("explicit Codex account fails closed when the optional codex-switch module is unavailable", async () => {
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
+    appServerOutput: "must not start"
+  }, []), {});
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "use missing account router",
+    account: "A"
+  });
+  assert.equal(result.kind, "failed");
+  if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_UNAVAILABLE");
+});
+
+test("AUTO account is deferred rather than silently selecting an unreported profile", async () => {
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-auto-"));
+  const switchExe = join(root, "codex-switch.exe");
+  writeFileSync(switchExe, "stub");
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "no" }, []), {
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe
+  });
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "auto", account: "AUTO" });
+  assert.equal(result.kind, "failed");
+  if (result.kind === "failed") assert.equal(result.error.code, "UNSUPPORTED_ACTION");
+});
+
 test("live web research enables native web_search without enabling OS network", async () => {
   const invocations: Invocation[] = [];
   const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
