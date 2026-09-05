@@ -38,6 +38,14 @@ supervisor can verify routing provenance. It never contains profile contents,
 intentionally unsupported in the first slice because the exact resolved account
 must be provable in dispatch evidence rather than guessed after execution.
 
+Codex model and reasoning routing are also explicit task-scoped inputs. Model is
+sent through native app-server `thread/start.model` with provider model fallback
+disabled. Reasoning is sent through `turn/start.effort` and is preserved for
+subsequent turns. Bridge does not guess a config key, lower the requested effort,
+or silently retry with another model. `task_result` and the durable execution
+receipt may persist only the non-secret routing provenance (`model`, `reasoning`,
+`account`) so Shoestring GOAL can verify the frozen route.
+
 Account selection never expands workspace, repository-write, C/P, I/W,
 deployment, production, Human-Gate, or deletion authority. Missing/disabled
 plug-in state leaves every task that omits `account` on the unchanged native
@@ -107,7 +115,7 @@ There is no HTTP server, UI, database, account system, background daemon, remote
 
 ## Read-only supervised task flow
 
-`run_task` is always read-only and accepts an optional `executor: "codex" | "dsh"` (default `codex`). Codex runs with approval `never`, a read-only sandbox policy, and network access disabled. The Codex executor starts native app-server threads with `thread/start`; after supervisor feedback it preserves the returned thread ID and uses `thread/resume`, followed by a new turn, so the conversation continues on the same Codex thread. The DSH executor runs each task as a headless invocation; it has no machine-resumable session seam, so a DSH `continue` is a new execution and no thread id is fabricated.
+`run_task` is always read-only and accepts an optional `executor: "codex" | "dsh"` (default `codex`). Codex-only routing may include exact `model`, `reasoning`, and `account`; DSH plus any of those routing pins fails closed. Codex runs with approval `never`, a read-only sandbox policy, and network access disabled. The Codex executor starts native app-server threads with `thread/start`; after supervisor feedback it preserves the returned thread ID and uses `thread/resume`, followed by a new turn, so the conversation continues on the same Codex thread. The DSH executor runs each task as a headless invocation; it has no machine-resumable session seam, so a DSH `continue` is a new execution and no thread id is fabricated.
 
 `task_result` reports `queued` or `running` with `ready: false`. A successful turn moves to `waiting_for_supervisor_review` with `ready: true` and `review_output`. For a successful Codex task it also exposes the matching **Bridge-authored durable `execution_receipt`** (`workspace_id`, exact registered `workspace_root`, `task_id`, executor, Bridge operation, `read_only: true`, receipt state, timestamp). The receipt is persisted independently of task supervision, contains no prompt/output text, and is provenance only—not write authorization or semantic acceptance. The response also includes the fixed `executor`, a real native `thread_id` when one exists (Codex only), the bounded, process-local `evidence` collected from command-execution and file-change protocol items, and `partial_output` when a genuine interrupt produced real partial output (the task still ends `failed`). Evidence is diagnostic task output, not authorization to write or proof that a requested semantic result is correct; when existing bounds truncate or evict evidence, explicit markers (`[truncated]`, changes-omitted counts, an `evidence-drop` item) make the incompleteness visible.
 

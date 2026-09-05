@@ -72,9 +72,18 @@ A/B isolated profile onboarding 與真實 account-routed E2E；本輪只針對 W
 direct-executable discovery 做 bounded repair/activation closeout。該 repair 仍必須完成 normal
 C/P + Owner I/W 才可進 current `main`。`AUTO` 仍維持 fail-closed。
 
+2026-09-05 Profile Selector extension 另外允許 GOAL 將既有 explicit `account` 與 exact
+`model`、exact `reasoning` 綁成 session Active Profile。Bridge `run_task` 的 `reasoning`
+只適用 Codex，必須映射到 native app-server `turn/start.effort`；`model` 維持
+`thread/start.model` 且禁止 provider model fallback。DSH + model/reasoning/account 必須
+fail-closed。`task_result` / execution receipt 只可保存非敏感 routing provenance，絕不可
+保存 token、auth.json、email、OAuth/API secret。Selector 本身仍屬 GOAL optional layer；
+不用 Selector 時 Bridge/Core 原路徑不得受影響。
+
 Canonical authority：
 
 - `D:\shoestring-goal\docs\policies\MODULAR_CAPABILITY_INTEGRATION_POLICY.md`
 - `D:\shoestring-goal\docs\CODEX_MULTI_ACCOUNT_PLUGIN.md`
+- `D:\shoestring-goal\docs\CODEX_PROFILE_SELECTOR.md`
 - `D:\AI_Knowledge_Base\wiki\global\CODEX_MULTI_ACCOUNT_PLUGIN.md`
 

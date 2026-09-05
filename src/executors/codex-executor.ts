@@ -383,7 +383,19 @@ export class CodexExecutor implements Executor {
       const sandboxPolicy = sandbox === "workspace-write"
         ? { type: "workspaceWrite", writableRoots: [this.workspaceRoot], networkAccess: false }
         : { type: "readOnly", networkAccess: false };
-      const turnResult = await this.call("turn/start", { threadId: this.threadId, input: [{ type: "text", text: request.instruction }], cwd: this.workspaceRoot, approvalPolicy: "never", sandboxPolicy });
+      const turnParams: Record<string, unknown> = {
+        threadId: this.threadId,
+        input: [{ type: "text", text: request.instruction }],
+        cwd: this.workspaceRoot,
+        approvalPolicy: "never",
+        sandboxPolicy
+      };
+      // Codex app-server v2 exposes reasoning as turn/start `effort`. The
+      // schema states that the override applies to this and subsequent turns,
+      // so resumed task turns retain the requested effort without mutating the
+      // user's global config. Omission preserves native Codex defaults.
+      if (request.reasoning !== undefined) turnParams.effort = request.reasoning;
+      const turnResult = await this.call("turn/start", turnParams);
       if (!object(turnResult) || !object(turnResult.turn) || typeof turnResult.turn.id !== "string") throw new Error();
       this.turnId = turnResult.turn.id;
       if (this.startedTurnId !== this.turnId) this.startedTurnId = undefined;

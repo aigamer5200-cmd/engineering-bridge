@@ -3,6 +3,7 @@ import { open, readFile, rename, unlink } from "node:fs/promises";
 import { CoreError } from "../core/errors.js";
 import { isId } from "../core/ids.js";
 import type { Id } from "../core/ids.js";
+import type { ReasoningEffort } from "../executors/executor.js";
 
 export type ExecutionReceiptOperation =
   | "run_task"
@@ -16,6 +17,8 @@ export interface ExecutionReceiptRecord {
   readonly workspaceId: string;
   readonly workspaceRoot: string;
   readonly executor: "codex";
+  readonly model?: string;
+  readonly reasoning?: ReasoningEffort;
   readonly account?: string;
   readonly operation: ExecutionReceiptOperation;
   readonly readOnly: true;
@@ -85,6 +88,8 @@ export class ExecutionReceiptStore {
         workspaceId: input.workspaceId,
         workspaceRoot: input.workspaceRoot,
         executor: input.executor,
+        ...(input.model === undefined ? {} : { model: input.model }),
+        ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
         ...(input.account === undefined ? {} : { account: input.account }),
         operation: input.operation,
         readOnly: input.readOnly,
@@ -145,6 +150,8 @@ export class ExecutionReceiptStore {
         workspace_id: record.workspaceId,
         workspace_root: record.workspaceRoot,
         executor: record.executor,
+        ...(record.model === undefined ? {} : { model: record.model }),
+        ...(record.reasoning === undefined ? {} : { reasoning: record.reasoning }),
         ...(record.account === undefined ? {} : { account: record.account }),
         operation: record.operation,
         read_only: record.readOnly,
@@ -189,6 +196,8 @@ function parseRecord(item: unknown): ExecutionReceiptRecord | undefined {
     workspaceId: item.workspace_id,
     workspaceRoot: item.workspace_root,
     executor: "codex",
+    ...(typeof item.model === "string" && item.model.length > 0 ? { model: item.model } : {}),
+    ...(isReasoningEffort(item.reasoning) ? { reasoning: item.reasoning } : {}),
     ...(typeof item.account === "string" && item.account.length > 0 ? { account: item.account } : {}),
     operation: item.operation,
     readOnly: true,
@@ -212,6 +221,8 @@ function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boo
     a.workspaceId === b.workspaceId &&
     a.workspaceRoot === b.workspaceRoot &&
     a.executor === b.executor &&
+    a.model === b.model &&
+    a.reasoning === b.reasoning &&
     a.account === b.account &&
     a.operation === b.operation &&
     a.readOnly === b.readOnly;
@@ -219,4 +230,9 @@ function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boo
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return value === "low" || value === "medium" || value === "high" ||
+    value === "xhigh" || value === "max" || value === "ultra";
 }

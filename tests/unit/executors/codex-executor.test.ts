@@ -310,6 +310,30 @@ test("explicit model is sent through thread/start and never through process argu
   });
 });
 
+test("explicit reasoning is sent through turn/start effort and omitted from process arguments", async () => {
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
+    appServerOutput: "reasoning answer"
+  }, invocations), {});
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "use selected reasoning",
+    model: "gpt-5.6-sol",
+    reasoning: "xhigh"
+  });
+
+  assert.equal(result.kind, "completed");
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  assert.equal(invocation.args.includes("xhigh"), false);
+  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(messages[2].params.model, "gpt-5.6-sol");
+  assert.equal(messages[2].params.allowProviderModelFallback, false);
+  assert.equal(messages[3].method, "turn/start");
+  assert.equal(messages[3].params.effort, "xhigh");
+});
+
 test("steer requires turn/started readiness and controls reset between turns", async () => {
   const invocations: Invocation[] = [];
   const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), {});

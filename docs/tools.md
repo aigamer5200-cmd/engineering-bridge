@@ -21,7 +21,7 @@ The receipt is delegation context, not an authority grant. It does not enable wr
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `account`, optional Codex-only `web_research`, optional `preflight_receipt`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `reasoning`, optional Codex-only `account`, optional Codex-only `web_research`, optional `preflight_receipt`.
 
 `account` is a task-scoped non-secret codex-switch profile alias. When omitted,
 Bridge uses the exact pre-existing native Codex path. When present, the alias
@@ -35,11 +35,17 @@ Account-routed tasks also require an absolute dedicated
 from `ENGINEERING_BRIDGE_CODEX_SWITCH_HOME` and prevents the optional plug-in
 from importing or mutating the native Codex login/profile state.
 
-`task_result.account` and `execution_receipt.account` expose only the bounded
-routing identity for account-routed tasks. They never expose credentials and do
-not change sandbox/workspace/write/C/P/I/W/deployment/production authority.
+`reasoning` is an exact native Codex reasoning effort. Bridge maps it to
+app-server `turn/start.effort`; it is not passed as a shell/config guess. DSH
+plus `reasoning` fails with `UNSUPPORTED_ACTION`. Bridge never silently
+downgrades or substitutes a requested reasoning effort.
 
-Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. For Codex, an explicit non-empty `model` is pinned when the native app-server thread starts and is reported in `task_result`; omitting it preserves Codex's existing default selection. DSH plus `model` fails closed, and Bridge does not silently substitute a different model. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
+`task_result` and `execution_receipt` expose only bounded non-secret routing
+provenance (`model`, `reasoning`, `account`) when explicitly requested. They
+never expose credentials and do not change sandbox/workspace/write/C/P/I/W/
+deployment/production authority.
+
+Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. For Codex, an explicit non-empty `model` is pinned at `thread/start` with provider model fallback disabled; an explicit `reasoning` is pinned at `turn/start.effort` and reused on subsequent turns. Omitting either preserves Codex's existing default selection. DSH plus any Codex-only routing field fails closed. Bridge never silently substitutes a different model/reasoning/account. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 
 ## `task_result`
 
@@ -61,7 +67,7 @@ DSH executions intentionally produce no Codex execution receipt.
 
 Input: `task_id`.
 
-Returns the task state, readiness, fixed `executor`, an explicitly pinned `model` when one was requested, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.
+Returns the task state, readiness, fixed `executor`, explicitly pinned `model`, `reasoning`, and `account` when requested, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.
 
 Conditional fields:
 

@@ -741,6 +741,37 @@ test("Codex account routing is task-scoped, observable, and rejected for DSH", a
   );
 });
 
+test("Codex reasoning is task-scoped, observable, and rejected for DSH", async () => {
+  const calls: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      calls.push(request);
+      return { kind: "completed", output: "done" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "reasoning scoped",
+    executor: "codex",
+    model: "gpt-5.6-sol",
+    reasoning: "xhigh"
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  assert.equal(service.taskView(taskId)?.reasoning, "xhigh");
+  assert.equal(calls[0]?.reasoning, "xhigh");
+  assert.throws(
+    () => service.startTask({
+      workspace_id: "known",
+      instruction: "bad reasoning",
+      executor: "dsh",
+      reasoning: "medium"
+    }),
+    (error: unknown) => error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+  );
+});
+
 test("thread id is omitted while the native thread does not exist yet", async () => {
   const pending = deferred<ExecutorResult>();
   const executor: Executor = { execute: () => pending.promise };

@@ -3,6 +3,7 @@ import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 
 export type SandboxMode = "read-only" | "workspace-write";
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export interface EvidenceChange { readonly path: string; readonly diff: string }
 export interface ExecutorEvidence {
@@ -18,6 +19,8 @@ export interface ExecutorRequest {
   readonly instruction: string;
   readonly sandbox?: SandboxMode;
   readonly model?: string;
+  /** Optional native Codex reasoning effort. Omitted preserves Codex defaults. */
+  readonly reasoning?: ReasoningEffort;
   /**
    * Optional GOAL-owned Codex account/profile alias. Omitted keeps the exact
    * native Codex path. This is transport selection only and grants no extra
