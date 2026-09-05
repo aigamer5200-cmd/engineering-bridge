@@ -67,10 +67,11 @@ Current first slice 只接受 explicit alias（例如 A/B）。Alias 必須通�
 allowlist；指定 account 才載入 optional `xjoker/codex-switch` adapter。`AUTO` 目前
 fail-closed，不得靜默挑選一個無法在 dispatch/receipt 證明的 account。
 
-Current `main` 已包含 first-slice explicit A/B routing。2026-09-05 activation round 已完成
-A/B isolated profile onboarding 與真實 account-routed E2E；本輪只針對 Windows npm Codex
-direct-executable discovery 做 bounded repair/activation closeout。該 repair 仍必須完成 normal
-C/P + Owner I/W 才可進 current `main`。`AUTO` 仍維持 fail-closed。
+Current `main` 已包含 first-slice explicit A/B routing，以及 Codex-only exact reasoning
+routing（`reasoning -> turn/start.effort`）。2026-09-05 Profile Selector / reasoning integration
+已完成 C/P + Owner I/W；B 四組 real-turn E2E 已成功，A 目前僅因 long-window quota exhausted
+而待補 real-turn E2E。不得為了關閉測試偷切 B、降 reasoning 或換 model。`AUTO` 仍維持
+fail-closed。
 
 2026-09-05 Profile Selector extension 另外允許 GOAL 將既有 explicit `account` 與 exact
 `model`、exact `reasoning` 綁成 session Active Profile。Bridge `run_task` 的 `reasoning`
