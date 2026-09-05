@@ -5,11 +5,16 @@ Date: 2026-09-05
 ## 1. Latest branch / checkpoint reference
 
 - Repo: `D:/Engineering_Bridge_System/engineering-bridge`
-- Worktree: `D:/WORKTREE_ZONE/engineering-bridge-f91dc6fb`
-- Branch: `governance/handoff-every-checkpoint-20260905`
-- Checkpoint: **the commit containing this HANDOFF / branch HEAD**
-- Base includes prior Multi-Account checkpoint
-  `c8c7b6c270e52e9511b9b1514dbfb20d13d1efd8`; no main I/W has occurred.
+- Integration Worktree:
+  `D:/WORKTREE_ZONE/engineering-bridge-iw-handoff-20260905`
+- Integration branch: `integration/handoff-governance-iw-20260905`
+- Pre-I/W `origin/main`: `59cd3a5146ea2228d8a6a72aa5c9b7faa61b0c84`
+- Approved source feature checkpoint:
+  `d8a06d85b7a633eedf5923019c8bfed577a1ef5f`
+- Integration closeout checkpoint: **the commit containing this HANDOFF /
+  integration branch HEAD**.
+- Integration method: `ff-only`; conflicts=`0`; merge commit=`none`;
+  force-push=`false`.
 
 ## 2. Completed
 
@@ -21,11 +26,18 @@ Date: 2026-09-05
 - Preserved existing intermediate C/P vs final I/W Human Gate semantics.
 - Governance implementation C/P `abf4db2` was pushed to the remote governance
   branch.
+- Owner explicitly authorized I/W. A fresh integration Worktree was created
+  from latest `origin/main` and fast-forwarded exactly to the approved source.
+- The approved source lineage includes the previously validated Multi-Account
+  Windows Codex routing checkpoint; this I/W does not add unrelated runtime
+  changes.
 
 ## 3. Pending
 
-- No further development work is pending in this governance phase.
-- Main I/W remains explicit Owner-only next gate.
+- Only non-forcing publication of this integration closeout checkpoint to main,
+  exact readback, and physical-main synchronization remain in I/W closeout.
+- Once `origin/main` equals this closeout checkpoint, no governance development
+  work remains pending.
 
 ## 4. Known issues / do-not-touch
 
@@ -44,16 +56,25 @@ Date: 2026-09-05
 - Final strict UTF-8/no-BOM check over both changed/HANDOFF files: PASS.
 - Final `git diff --check`: PASS.
 - Final sensitive-path status scan: PASS.
+- Post-ff full integrated-tree regression: `260 tests / 259 PASS / 0 FAIL /
+  1 POSIX-only SKIP`.
+- Post-ff strict UTF-8/no-BOM=`5 files PASS`; `git diff --check=PASS`;
+  sensitive-path diff scan=`PASS`.
+- `npm ci` reproduced the known dependency audit notice: 2 vulnerabilities
+  (1 moderate, 1 high); this pre-existing unrelated item was not changed here.
 
 ## 6. Next explicit task
 
-Wait with the other aligned repos at the Owner Human Gate for explicit `I/W`.
+Re-fetch `origin/main`; if it still equals the exact pre-I/W checkpoint, push
+this integration closeout checkpoint to main without force, verify exact
+readback and synchronize physical main. After that, no further governance task
+is required.
 
 ## 7. WT / repo state
 
-- Isolated governance WT only; physical main untouched.
-- Governance implementation checkpoint is already pushed; this HANDOFF-only
-  closeout checkpoint will become the final branch HEAD.
+- Fresh isolated integration WT is based on exact pre-I/W main and contains only
+  the approved feature lineage plus this HANDOFF closeout.
+- Physical main remains untouched until post-push ff-only synchronization.
 
 ## 8. Cross-account/session resumability
 
