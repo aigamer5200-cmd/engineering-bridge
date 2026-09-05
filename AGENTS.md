@@ -22,6 +22,29 @@ Canonical authority：
 - `D:\shoestring-goal\docs\policies\DEVELOPMENT_STOP_NOTIFICATION_POLICY.md`
 - `D:\AI_Knowledge_Base\wiki\global\DEVELOPMENT_STOP_NOTIFICATION.md`
 
+## Global phase checkpoint / HANDOFF hard rule
+
+本 repo 的一般開發與 GOAL-managed 開發都必須遵守：
+
+```text
+階段完成 -> 整理 Repo -> 更新 HANDOFF -> C/P -> 下一階段／換帳號／換視窗
+```
+
+- 每一個正式 phase-complete C/P 前都必須先更新 durable HANDOFF，且 HANDOFF 要跟該
+  checkpoint 一起進 Git；不能只留在聊天、開場白或上一條 Codex session。
+- HANDOFF 至少記錄：最新 branch / checkpoint commit reference、已完成、pending、已知
+  問題與禁止碰範圍、測試/驗證、下一步明確任務、WT/repo 狀態，以及另一個 Codex
+  account/session 可不依賴上一條 native session 直接接手的聲明。
+- A/B account 切換必須建立新的 account-bound Codex native session/thread；不得把 A 的
+  native thread 直接換成 B。新的 account 從 durable HANDOFF + repo state 恢復。
+- intermediate C/P 仍不構成 Human Gate；HANDOFF + C/P 後直接繼續剩餘工作。final C/P
+  仍依既有 TG / I/W Human Gate 規則處理。
+
+Canonical authority：
+
+- `D:\shoestring-goal\docs\policies\CHECKPOINT_POLICY.md`
+- `D:\AI_Knowledge_Base\wiki\DEVELOPMENT_WORKFLOW.md`
+
 ## Optional Codex account/profile routing boundary
 
 2026-09-05 Owner 已核准 GOAL 未來以 optional account-router + upstream-derived
