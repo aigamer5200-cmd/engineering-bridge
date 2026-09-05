@@ -21,9 +21,9 @@ The receipt is delegation context, not an authority grant. It does not enable wr
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `preflight_receipt`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `web_research`, optional `preflight_receipt`.
 
-Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
+Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. For Codex, an explicit non-empty `model` is pinned when the native app-server thread starts and is reported in `task_result`; omitting it preserves Codex's existing default selection. DSH plus `model` fails closed, and Bridge does not silently substitute a different model. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 
 ## `task_result`
 
@@ -45,7 +45,7 @@ DSH executions intentionally produce no Codex execution receipt.
 
 Input: `task_id`.
 
-Returns the task state, readiness, fixed `executor`, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.
+Returns the task state, readiness, fixed `executor`, an explicitly pinned `model` when one was requested, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.
 
 Conditional fields:
 

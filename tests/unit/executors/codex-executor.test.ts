@@ -201,6 +201,37 @@ test("live web research enables native web_search without enabling OS network", 
   });
 });
 
+test("explicit model is sent through thread/start and never through process arguments", async () => {
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
+    appServerOutput: "model answer"
+  }, invocations), {});
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "use selected model",
+    model: "gpt-6-astra"
+  });
+
+  assert.equal(result.kind, "completed");
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  assert.deepEqual(invocation.args, ["app-server", "--stdio"]);
+  assert.equal(invocation.args.includes("gpt-6-astra"), false);
+  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(messages[2], {
+    id: 2,
+    method: "thread/start",
+    params: {
+      cwd: TRUSTED_CWD,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      model: "gpt-6-astra",
+      allowProviderModelFallback: false
+    }
+  });
+});
+
 test("steer requires turn/started readiness and controls reset between turns", async () => {
   const invocations: Invocation[] = [];
   const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), {});

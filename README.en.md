@@ -61,6 +61,7 @@ The controlled-write rule is simple: **show the diff first, write only after exa
 - **Memory can inform planning.** A client's global memory or an external memory system may contribute context, but memory is not built into Bridge.
 - **Planning and execution have distinct jobs.** Chat shapes the goal; the local executor (Codex or DSH) inspects the actual workspace and produces evidence or a patch; Bridge scopes and validates the handoff.
 - **Execution remains configurable.** Codex model and provider configuration offers choice and flexibility; it is not a promise that execution will be cheaper.
+- **Codex model selection can be explicit per task.** `run_task` accepts an optional Codex-only `model`; an explicit selection is pinned to the native Codex thread and reported by `task_result`. Omitting it preserves the existing default. DSH plus `model` fails closed and Bridge does not silently substitute another model.
 - **The human keeps authority.** You decide whether a patch is written and whether anything is tested, committed, pushed, or released.
 - **Two executors are implemented: Codex and DSH.** `run_task`, `generate_controlled_patch`, and `refine_controlled_patch` each accept an optional `executor: "codex" | "dsh"` (default `codex`); the executor is selected per call, and `refine_controlled_patch` does not inherit the parent proposal's executor. `apply_controlled_patch` has no executor/model call—Bridge validates and applies the patch itself. Other CLI agents remain a future, adapter-by-adapter direction—not current support.
 

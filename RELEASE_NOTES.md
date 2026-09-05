@@ -1,5 +1,18 @@
 # Release notes
 
+## v1.2.1-biaogu.6 (custom fork) — explicit Codex model routing
+
+- `run_task` accepts an optional non-empty `model` for `executor=codex`.
+- The selected model is passed through native Codex app-server `thread/start`;
+  it is never placed in shell/process arguments.
+- `task_result` reports an explicitly pinned model for orchestration evidence.
+- The model remains fixed for the supervised task/native Codex thread,
+  including later `continue` turns on that thread.
+- `executor=dsh` plus `model` fails closed instead of ignoring the selection.
+- Omitting `model` preserves the previous default-model behavior.
+- Bridge does not implement silent model substitution or a hidden fallback
+  chain. Model routing grants no additional authority.
+
 ## GOAL v3.1 source-alignment note (2026-08-30)
 
 - Task-local Bridge/Codex failures now distinguish seamless recovery from a

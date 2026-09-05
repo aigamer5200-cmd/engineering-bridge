@@ -335,6 +335,13 @@ export class CodexExecutor implements Executor {
       this.notify("initialized", {});
       const sandbox = request.sandbox ?? "read-only";
       const threadParams: Record<string, unknown> = { cwd: this.workspaceRoot, approvalPolicy: "never", sandbox };
+      // Explicit model selection belongs to the native app-server protocol,
+      // not process arguments. A resumed Bridge task reuses the same native
+      // thread and therefore keeps the model selected when that thread began.
+      if (request.model !== undefined && request.threadId === undefined) {
+        threadParams.model = request.model;
+        threadParams.allowProviderModelFallback = false;
+      }
       if (request.webSearch === "live") {
         // Native Codex web_search is a model tool, not shell/network access.
         // Keep the OS sandbox network boundary disabled below; this config only

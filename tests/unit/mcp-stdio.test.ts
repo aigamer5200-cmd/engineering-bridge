@@ -66,6 +66,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     const runTaskTool = listed.tools.find(({ name }) => name === "run_task");
     const runTaskSchema = runTaskTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
     assert.equal(typeof runTaskSchema?.properties?.web_research, "object");
+    assert.equal(typeof runTaskSchema?.properties?.model, "object");
 
     const result = await client.callTool({
       name: "generate_controlled_patch",
@@ -104,6 +105,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     for (const argumentsValue of [
       { workspace_id: "missing", instruction: "inspect" },
       { workspace_id: "missing", instruction: "inspect", executor: "codex" },
+      { workspace_id: "missing", instruction: "inspect", executor: "codex", model: "gpt-6-astra" },
       { workspace_id: "missing", instruction: "inspect", executor: "dsh" },
       {
         workspace_id: "missing",
@@ -146,6 +148,18 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     });
     assert.equal(unknownExecutor.isError, true);
     assert.equal(JSON.stringify(unknownExecutor).includes("task_id"), false);
+
+    const dshModel = await client.callTool({
+      name: "run_task",
+      arguments: {
+        workspace_id: "missing",
+        instruction: "inspect",
+        executor: "dsh",
+        model: "gpt-6-astra"
+      }
+    });
+    assert.equal(dshModel.isError, true);
+    assert.equal(JSON.stringify(dshModel).includes("task_id"), false);
 
     const malformedReceipt = await client.callTool({
       name: "run_task",
@@ -211,13 +225,15 @@ test("task_result honestly reports the fixed executor and never fabricates a thr
     // Default selection is codex; the JSON carries it and no thread_id exists.
     const codexRun = await call("run_task", {
       workspace_id: "missing",
-      instruction: "inspect"
+      instruction: "inspect",
+      model: "gpt-6-astra"
     });
     const codexTaskId = codexRun.body.task_id;
     assert.equal(typeof codexTaskId, "string");
     if (typeof codexTaskId !== "string") return;
     const codexView = await waitForTerminal(codexTaskId);
     assert.equal(codexView.executor, "codex");
+    assert.equal(codexView.model, "gpt-6-astra");
     assert.equal("thread_id" in codexView, false);
     assert.deepEqual(codexView.error, {
       code: "UNKNOWN_WORKSPACE",

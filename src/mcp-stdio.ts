@@ -109,20 +109,22 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. For Codex only, web_research=true enables native live web_search while shell/OS network access remains disabled. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction without granting extra authority. This tool does not modify workspace files.",
+    description: "Run a read-only task with the selected executor in a pre-registered workspace. For Codex only, model may pin an explicit Codex model for this task/thread and web_research=true enables native live web_search while shell/OS network access remains disabled. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction without granting extra authority. This tool does not modify workspace files.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
       executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      model: z.string().trim().min(1).max(200).optional(),
       web_research: z.boolean().optional().default(false),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, web_research, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, web_research, preflight_receipt }) => {
     try {
       const { taskId } = service.startTask({
         workspace_id,
         instruction,
         executor,
+        ...(model === undefined ? {} : { model }),
         ...(web_research ? { web_research: true } : {}),
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
       });
@@ -146,6 +148,7 @@ async function main(): Promise<void> {
     return jsonContent({ task_id: view.taskId, state: view.state,
       ...(view.source === undefined ? {} : { source: view.source }),
       ...(view.executor === undefined ? {} : { executor: view.executor }),
+      ...(view.model === undefined ? {} : { model: view.model }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
       ...(view.output === undefined ? {} : { output: view.output }),
