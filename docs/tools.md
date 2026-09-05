@@ -23,6 +23,14 @@ The receipt is delegation context, not an authority grant. It does not enable wr
 
 Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `web_research`, optional `preflight_receipt`.
 
+Current contract note (2026-09-05): `run_task` does **not** yet expose a Codex
+account/profile selector. Shoestring GOAL has approved that capability as a
+future optional plug-in/router, but it must remain additive: an omitted/disabled
+router preserves the current native Codex path, and account/profile selection
+must not change any Bridge workspace/write/approval authority. Do not invent an
+`account` argument until a separately implemented and tested Bridge contract
+actually adds one.
+
 Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. For Codex, an explicit non-empty `model` is pinned when the native app-server thread starts and is reported in `task_result`; omitting it preserves Codex's existing default selection. DSH plus `model` fails closed, and Bridge does not silently substitute a different model. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 
 ## `task_result`

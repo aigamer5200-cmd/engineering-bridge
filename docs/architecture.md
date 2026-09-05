@@ -11,6 +11,19 @@ Engineering Bridge is a local STDIO MCP server with nine tools and a small layer
 
 On Windows, Codex provider selection is deliberately package-stable. When PATH exposes a valid global npm `codex.cmd` whose sibling `node_modules/@openai/codex/bin/codex.js` exists, `CodexExecutor` selects that official global npm installation before any directly spawnable `codex.exe` (for example a VS Code extension-bundled copy). The npm shim itself is never executed through `cmd.exe`; Bridge launches its resolved JavaScript target with `process.execPath`. If the global npm package is absent or incomplete, normal direct-executable resolution remains the fallback. Local `node_modules/.bin` shims are still supported, but they do not outrank a real executable merely because global-provider preference is enabled.
 
+Codex **account/profile routing is intentionally a separate concern from
+provider executable selection**. Shoestring GOAL has approved a future optional
+account-router integration based on an upstream-derived multi-account module,
+but Bridge Core must not hard-depend on that module. The current Bridge API does
+not yet expose an account/profile selector and this document must not be read as
+claiming that runtime feature exists today. If a later Bridge contract accepts a
+task-scoped account/profile selection, omission must preserve the current Codex
+behavior, the resolved profile identity must be observable, and module
+disable/absence/failure must retain the existing native Codex path. Account
+selection never expands workspace, repository-write, C/P, I/W, deployment,
+production, Human-Gate, or deletion authority. Credentials/profile secrets are
+not eligible for execution receipts or repository persistence.
+
 Shoestring GOAL treats Bridge as the single formal Codex entrypoint. A caller may
 use shell/DS execution for bounded provider diagnostics, but a formal Codex task
 must be represented by a Bridge task/proposal and its task identity. Recovery
