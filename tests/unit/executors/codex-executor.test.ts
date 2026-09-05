@@ -175,17 +175,21 @@ test("explicit Codex account routes through codex-switch while account omission 
   const switchExe = join(root, "codex-switch.exe");
   const switchHome = join(root, "switch-home");
   const isolatedCodexHome = join(root, "isolated-codex-home");
+  const codexBinDir = join(root, "codex-bin");
+  mkdirSync(codexBinDir);
   writeFileSync(switchExe, "stub");
+  writeFileSync(join(codexBinDir, "codex.exe"), "stub");
   const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
     appServerOutput: "account answer"
   }, invocations), {
-    PATH: "/bin",
+    PATH: "C:\\native-path",
     HOME: "/home/test",
     ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
     ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
     ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_BIN_DIR: codexBinDir,
     ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
-  });
+  }, "win32");
 
   const result = await executor.execute({
     taskId: TASK_ID,
@@ -199,7 +203,23 @@ test("explicit Codex account routes through codex-switch while account omission 
   assert.deepEqual(invocations[0]?.args, ["--json", "launch", "A", "--", "app-server", "--stdio"]);
   assert.equal(invocations[0]?.options.env?.CODEX_SWITCH_HOME, switchHome);
   assert.equal(invocations[0]?.options.env?.CODEX_HOME, isolatedCodexHome);
+  assert.equal(invocations[0]?.options.env?.PATH, `${codexBinDir};C:\\native-path`);
   assert.deepEqual(invocations[0]?.signals, [], "codex-switch must restore staged auth instead of being killed on turn completion");
+});
+
+test("Windows account routing fails closed when codex-switch has no directly spawnable Codex bin", async () => {
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-account-no-bin-"));
+  const switchExe = join(root, "codex-switch.exe");
+  writeFileSync(switchExe, "stub");
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "no" }, []), {
+    PATH: "C:\\npm-shim-only",
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: join(root, "isolated-codex-home"),
+    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
+  }, "win32");
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "use A", account: "A" });
+  assert.equal(result.kind, "failed");
+  if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_UNAVAILABLE");
 });
 
 test("explicit Codex account fails closed when the optional codex-switch module is unavailable", async () => {

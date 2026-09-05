@@ -44,8 +44,10 @@ Current first slice 只接受 explicit alias（例如 A/B）。Alias 必須通�
 allowlist；指定 account 才載入 optional `xjoker/codex-switch` adapter。`AUTO` 目前
 fail-closed，不得靜默挑選一個無法在 dispatch/receipt 證明的 account。
 
-這仍是 feature-WT implementation，必須完成 normal C/P + Owner I/W 後才可稱為 current
-production Bridge behavior；A/B OAuth/device-code profile onboarding 另屬 activation gate。
+Current `main` 已包含 first-slice explicit A/B routing。2026-09-05 activation round 已完成
+A/B isolated profile onboarding 與真實 account-routed E2E；本輪只針對 Windows npm Codex
+direct-executable discovery 做 bounded repair/activation closeout。該 repair 仍必須完成 normal
+C/P + Owner I/W 才可進 current `main`。`AUTO` 仍維持 fail-closed。
 
 Canonical authority：
 

@@ -80,7 +80,7 @@ export class CodexExecutor implements Executor {
     let child: ChildProcessWithoutNullStreams;
     let accountRouted = false;
     try {
-      const accountLaunch = resolveCodexAccountLaunch(request.account, this.hostEnvironment);
+      const accountLaunch = resolveCodexAccountLaunch(request.account, this.hostEnvironment, this.platform);
       accountRouted = accountLaunch !== undefined;
       const childEnvironment = environment(this.hostEnvironment);
       if (accountLaunch !== undefined) {

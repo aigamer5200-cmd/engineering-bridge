@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { CoreError } from "../core/errors.js";
 
@@ -23,7 +23,8 @@ export interface CodexAccountLaunch {
  */
 export function resolveCodexAccountLaunch(
   account: string | undefined,
-  hostEnvironment: Readonly<NodeJS.ProcessEnv>
+  hostEnvironment: Readonly<NodeJS.ProcessEnv>,
+  platform: NodeJS.Platform = process.platform
 ): CodexAccountLaunch | undefined {
   if (account === undefined) return undefined;
   const alias = account.trim();
@@ -51,6 +52,19 @@ export function resolveCodexAccountLaunch(
     throw new CoreError("CODEX_ACCOUNT_UNAVAILABLE");
   }
 
+  const environmentOverlay: NodeJS.ProcessEnv = {
+    ...(switchHome ? { CODEX_SWITCH_HOME: switchHome } : {}),
+    CODEX_HOME: isolatedCodexHome
+  };
+  if (platform === "win32") {
+    const codexBinDir = hostEnvironment.ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_BIN_DIR?.trim();
+    if (!codexBinDir || !isAbsolute(codexBinDir) || !existsSync(join(codexBinDir, "codex.exe"))) {
+      throw new CoreError("CODEX_ACCOUNT_UNAVAILABLE");
+    }
+    const hostPath = environmentValue(hostEnvironment, "PATH");
+    environmentOverlay.PATH = hostPath ? `${codexBinDir};${hostPath}` : codexBinDir;
+  }
+
   return {
     account: alias,
     executable,
@@ -58,9 +72,16 @@ export function resolveCodexAccountLaunch(
     // The inner Codex app-server inherits stdio byte-for-byte. Its JSON-RPC is
     // therefore still the only stdout while the supervised turn is active.
     args: ["--json", "launch", alias, "--", "app-server", "--stdio"],
-    environmentOverlay: {
-      ...(switchHome ? { CODEX_SWITCH_HOME: switchHome } : {}),
-      CODEX_HOME: isolatedCodexHome
-    }
+    environmentOverlay
   };
+}
+
+function environmentValue(host: Readonly<NodeJS.ProcessEnv>, key: string): string | undefined {
+  const needle = key.toLowerCase();
+  for (const name of Object.keys(host)) {
+    if (name.toLowerCase() !== needle) continue;
+    const value = host[name];
+    return typeof value === "string" && value !== "" ? value : undefined;
+  }
+  return undefined;
 }
