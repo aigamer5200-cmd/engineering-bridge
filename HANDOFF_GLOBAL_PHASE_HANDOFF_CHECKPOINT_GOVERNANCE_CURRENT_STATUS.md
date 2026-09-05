@@ -19,10 +19,12 @@ Date: 2026-09-05
 - Explicitly required fresh native Codex sessions for A/B account switching and
   recovery from HANDOFF + repo state.
 - Preserved existing intermediate C/P vs final I/W Human Gate semantics.
+- Governance implementation C/P `abf4db2` was pushed to the remote governance
+  branch.
 
 ## 3. Pending
 
-- Final hygiene, selective C/P and push of this governance branch.
+- No further development work is pending in this governance phase.
 - Main I/W remains explicit Owner-only next gate.
 
 ## 4. Known issues / do-not-touch
@@ -45,13 +47,13 @@ Date: 2026-09-05
 
 ## 6. Next explicit task
 
-Selective C/P + push -> wait with the other aligned repos
-for explicit Owner `I/W`.
+Wait with the other aligned repos at the Owner Human Gate for explicit `I/W`.
 
 ## 7. WT / repo state
 
 - Isolated governance WT only; physical main untouched.
-- Expected tracked changes: `AGENTS.md` and this HANDOFF only.
+- Governance implementation checkpoint is already pushed; this HANDOFF-only
+  closeout checkpoint will become the final branch HEAD.
 
 ## 8. Cross-account/session resumability
 
