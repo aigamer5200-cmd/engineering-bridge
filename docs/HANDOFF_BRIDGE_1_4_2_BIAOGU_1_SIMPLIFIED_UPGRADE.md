@@ -1,5 +1,23 @@
 # Engineering Bridge 1.4.2-biaogu.1 Simplified Upgrade Handoff
 
+## I/W completion
+
+Owner-authorized I/W completed on 2026-09-06.
+
+```text
+integration mode: ff-only
+integrated source commit: c1125e0ae823379fa51f430302c71c2cede3ca4b
+main push: PASS
+force push: NO
+merge commit: NO
+post-I/W main regression: 382 total / 377 PASS / 0 FAIL / 5 Windows-specific SKIP
+git diff --check: PASS
+```
+
+Production was not restarted by the Git integration. The already-promoted
+`1.4.2-biaogu.1` runtime remains the active Production runtime, and
+`1.2.1-biaogu.6` remains the retained previous/rollback target.
+
 ## Current execution context
 
 ```text
@@ -278,18 +296,15 @@ or auth payload.
   authorization;
 - do not broaden Worktree authority outside `D:\WORKTREE_ZONE`.
 
-## Remaining Owner gate
+## Final integrated state
 
 ```text
 Upgrade execution: COMPLETE
 Production acceptance: PASS
 Rollback capability: PRESERVED
 Candidate source branch: checkpointed/pushed
-
-Next action requires Owner authorization:
-I/W candidate/bridge-v1.4.2-biaogu-20260906 into the fork main, or leave the
-source candidate branch isolated while Production continues to run the
-immutable 1.4.2-biaogu.1 runtime.
+Owner I/W: COMPLETE
+fork main integration: COMPLETE
 ```
 
 The next window/account can continue from this repository state plus this
