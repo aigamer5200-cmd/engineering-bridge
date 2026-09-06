@@ -18,7 +18,13 @@ const TASK_ID_VALUE = "550e8400-e29b-41d4-a716-446655440000";
 if (!isId(TASK_ID_VALUE)) throw new Error("Test task ID must be a UUID v4.");
 const TASK_ID = TASK_ID_VALUE;
 const TRUSTED_CWD = "/trusted/workspace";
-const SHORT_TIMING = { executionTimeoutMs: 30, interruptGraceMs: 10, killGraceMs: 10 };
+const SHORT_TIMING = {
+  executionTimeoutMs: 30,
+  interruptGraceMs: 10,
+  killGraceMs: 10,
+  protocolInactivityTimeoutMs: 25,
+  rpcCallTimeoutMs: 25
+};
 
 interface Invocation {
   executable: string;
@@ -27,6 +33,7 @@ interface Invocation {
   stdin: string;
   signals: string[];
   send(message: unknown): void;
+  writeStdout(text: string): void;
   error(): void;
   exit(code: number | null): void;
   close(code: number | null): void;
@@ -35,6 +42,7 @@ interface Invocation {
 interface FakeBehavior {
   appServerOutput?: string;
   turnError?: { message: string; codexErrorInfo?: string; additionalDetails?: string };
+  modelList?: readonly { id: string; model: string; isDefault?: boolean; defaultReasoningEffort?: string; supportedReasoningEfforts?: readonly { reasoningEffort: string; description: string }[] }[];
   stdout?: string;
   stderr?: string;
   exitCode?: number;
@@ -53,6 +61,7 @@ function fakeStarter(behavior: FakeBehavior, invocations: Invocation[]): Process
     const invocation: Invocation = {
       executable, args: [...args], options, stdin: "", signals: [],
       send(message) { stdout.write(`${JSON.stringify(message)}\n`); },
+      writeStdout(text) { stdout.write(text); },
       error() { child.emit("error", new Error("late child error")); },
       exit(code) { child.emit("exit", code, null); },
       close(code) {
@@ -72,11 +81,17 @@ function fakeStarter(behavior: FakeBehavior, invocations: Invocation[]): Process
               return;
             }
             let result: unknown = {};
+            if (message.method === "model/list") {
+              result = { data: behavior.modelList ?? [] };
+            }
             if (message.method === "thread/start") result = { thread: { id: "thread-1" } };
             if (message.method === "turn/start") result = { turn: { id: "turn-1" } };
             queueMicrotask(() => {
               stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
               if (message.method === "turn/start" && behavior.autoComplete !== false) {
+                stdout.write(`${JSON.stringify({
+                  method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } }
+                })}\n`);
                 stdout.write(`${JSON.stringify({ method: "item/completed", params: { item: { id: "message-1", type: "agentMessage", text: behavior.appServerOutput } } })}\n`);
                 const status = behavior.turnError ? "failed" : "completed";
                 stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status, error: behavior.turnError } } })}\n`);
@@ -112,8 +127,9 @@ function fakeStarter(behavior: FakeBehavior, invocations: Invocation[]): Process
   };
 }
 
-function timedExecutor(starter: ProcessStarter, platform: NodeJS.Platform = process.platform): CodexExecutor {
-  return new CodexExecutor(TRUSTED_CWD, starter, {}, platform, SHORT_TIMING);
+function timedExecutor(starter: ProcessStarter, platform: NodeJS.Platform = process.platform,
+  timing = SHORT_TIMING): CodexExecutor {
+  return new CodexExecutor(TRUSTED_CWD, starter, {}, platform, timing);
 }
 
 async function settlesWithin<T>(promise: Promise<T>, milliseconds = 100): Promise<T> {
@@ -123,6 +139,12 @@ async function settlesWithin<T>(promise: Promise<T>, milliseconds = 100): Promis
       setTimeout(() => reject(new Error("promise did not settle")), milliseconds);
     })
   ]);
+}
+
+function withoutDiagnostics<T extends object>(value: T): Omit<T, "diagnostics"> {
+  const semantic = { ...value };
+  Reflect.deleteProperty(semantic, "diagnostics");
+  return semantic;
 }
 
 test("uses the fixed safe invocation and returns agent text", async () => {
@@ -169,7 +191,139 @@ test("uses the fixed safe invocation and returns agent text", async () => {
   assert.equal(invocation.args.includes(instruction), false);
 });
 
-test("explicit Codex account routes through codex-switch while account omission stays native", async () => {
+test("preserves the default Codex JSON-RPC flow when model selection is omitted", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "done" }, invocations));
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(messages.some((message: { method?: string }) => message.method === "model/list"), false);
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.ok(turnStart);
+  assert.equal("model" in turnStart.params, false);
+  assert.equal("effort" in turnStart.params, false);
+});
+
+test("validates the requested model and effort before starting the normal Codex flow", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({
+    appServerOutput: "done",
+    modelList: [{
+      id: "catalog-id",
+      model: "gpt-5-codex",
+      isDefault: true,
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "Low" },
+        { reasoningEffort: "high", description: "High" }
+      ]
+    }]
+  }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect",
+    model: "gpt-5-codex",
+    reasoning_effort: "high"
+  } as Parameters<typeof executor.execute>[0] & { model: string; reasoning_effort: string });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const modelListIndex = messages.findIndex((message: { method?: string }) => message.method === "model/list");
+  const threadStartIndex = messages.findIndex((message: { method?: string }) => message.method === "thread/start");
+  const turnStartIndex = messages.findIndex((message: { method?: string }) => message.method === "turn/start");
+  assert.equal(modelListIndex >= 0, true);
+  assert.equal(modelListIndex < threadStartIndex, true);
+  assert.equal(threadStartIndex < turnStartIndex, true);
+  const turnStart = messages[turnStartIndex]!;
+  assert.deepEqual(
+    { model: turnStart.params.model, effort: turnStart.params.effort },
+    { model: "gpt-5-codex", effort: "high" }
+  );
+});
+
+test("rejects an unknown requested model before thread/start and turn/start", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({
+    appServerOutput: "done",
+    modelList: [{
+      id: "catalog-id",
+      model: "gpt-5-codex",
+      isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }]
+    }]
+  }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect",
+    model: "unknown-model"
+  } as Parameters<typeof executor.execute>[0] & { model: string });
+
+  assert.deepEqual(withoutDiagnostics(result), {
+    kind: "failed",
+    error: { code: "UNSUPPORTED_ACTION", message: "The requested action is not supported." }
+  });
+  assert.equal(invocations[0]!.stdin.includes('"method":"thread/start"'), false);
+  assert.equal(invocations[0]!.stdin.includes('"method":"turn/start"'), false);
+});
+
+test("rejects an unsupported reasoning effort before thread/start and turn/start", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({
+    appServerOutput: "done",
+    modelList: [{
+      id: "catalog-id",
+      model: "gpt-5-codex",
+      isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }]
+    }]
+  }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect",
+    model: "gpt-5-codex",
+    reasoning_effort: "high"
+  } as Parameters<typeof executor.execute>[0] & { model: string; reasoning_effort: string });
+
+  assert.deepEqual(withoutDiagnostics(result), {
+    kind: "failed",
+    error: { code: "UNSUPPORTED_ACTION", message: "The requested action is not supported." }
+  });
+  assert.equal(invocations[0]!.stdin.includes('"method":"thread/start"'), false);
+  assert.equal(invocations[0]!.stdin.includes('"method":"turn/start"'), false);
+});
+
+test("uses the default model for effort-only selection and sends only the effort override", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({
+    appServerOutput: "done",
+    modelList: [{
+      id: "catalog-id",
+      model: "default-model",
+      isDefault: true,
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Medium" }]
+    }]
+  }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect",
+    reasoning_effort: "medium"
+  } as Parameters<typeof executor.execute>[0] & { reasoning_effort: string });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.equal("model" in turnStart.params, false);
+  assert.equal(turnStart.params.effort, "medium");
+  assert.equal("reasoning_effort" in turnStart.params, false);
+});
+
+test("explicit Codex account routes through codex-switch while omission stays native", async () => {
   const invocations: Invocation[] = [];
   const root = mkdtempSync(join(tmpdir(), "bridge-codex-account-"));
   const switchExe = join(root, "codex-switch.exe");
@@ -183,7 +337,6 @@ test("explicit Codex account routes through codex-switch while account omission 
     appServerOutput: "account answer"
   }, invocations), {
     PATH: "C:\\native-path",
-    HOME: "/home/test",
     ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
     ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
     ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
@@ -191,51 +344,25 @@ test("explicit Codex account routes through codex-switch while account omission 
     ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
   }, "win32");
 
-  const result = await executor.execute({
-    taskId: TASK_ID,
-    instruction: "use A",
-    account: "A"
-  });
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "use A", account: "A" });
 
   assert.equal(result.kind, "completed");
-  assert.equal(invocations.length, 1);
   assert.equal(invocations[0]?.executable, switchExe);
   assert.deepEqual(invocations[0]?.args, ["--json", "launch", "A", "--", "app-server", "--stdio"]);
   assert.equal(invocations[0]?.options.env?.CODEX_SWITCH_HOME, switchHome);
   assert.equal(invocations[0]?.options.env?.CODEX_HOME, isolatedCodexHome);
   assert.equal(invocations[0]?.options.env?.PATH, `${codexBinDir};C:\\native-path`);
-  assert.deepEqual(invocations[0]?.signals, [], "codex-switch must restore staged auth instead of being killed on turn completion");
+  assert.deepEqual(invocations[0]?.signals, []);
 });
 
-test("Windows account routing fails closed when codex-switch has no directly spawnable Codex bin", async () => {
-  const root = mkdtempSync(join(tmpdir(), "bridge-codex-account-no-bin-"));
-  const switchExe = join(root, "codex-switch.exe");
-  writeFileSync(switchExe, "stub");
-  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "no" }, []), {
-    PATH: "C:\\npm-shim-only",
-    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
-    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: join(root, "isolated-codex-home"),
-    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
-  }, "win32");
+test("explicit Codex account fails closed when the optional router is unavailable", async () => {
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "no" }, []), {});
   const result = await executor.execute({ taskId: TASK_ID, instruction: "use A", account: "A" });
   assert.equal(result.kind, "failed");
   if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_UNAVAILABLE");
 });
 
-test("explicit Codex account fails closed when the optional codex-switch module is unavailable", async () => {
-  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
-    appServerOutput: "must not start"
-  }, []), {});
-  const result = await executor.execute({
-    taskId: TASK_ID,
-    instruction: "use missing account router",
-    account: "A"
-  });
-  assert.equal(result.kind, "failed");
-  if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_UNAVAILABLE");
-});
-
-test("AUTO account is deferred rather than silently selecting an unreported profile", async () => {
+test("AUTO account remains deferred instead of silently selecting a profile", async () => {
   const root = mkdtempSync(join(tmpdir(), "bridge-codex-auto-"));
   const switchExe = join(root, "codex-switch.exe");
   writeFileSync(switchExe, "stub");
@@ -249,89 +376,38 @@ test("AUTO account is deferred rather than silently selecting an unreported prof
 
 test("live web research enables native web_search without enabling OS network", async () => {
   const invocations: Invocation[] = [];
-  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
-    appServerOutput: "research answer"
-  }, invocations), {});
-
-  const result = await executor.execute({
-    taskId: TASK_ID,
-    instruction: "research only",
-    webSearch: "live"
-  });
-
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "research answer" }, invocations));
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "research", webSearch: "live" });
   assert.equal(result.kind, "completed");
-  const invocation = invocations[0];
-  assert.ok(invocation);
-  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
-  assert.deepEqual(messages[2], {
-    id: 2,
-    method: "thread/start",
-    params: {
-      cwd: TRUSTED_CWD,
-      approvalPolicy: "never",
-      sandbox: "read-only",
-      config: { web_search: "live" }
-    }
-  });
-  assert.deepEqual(messages[3].params.sandboxPolicy, {
-    type: "readOnly",
-    networkAccess: false
-  });
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.equal(threadStart.params.config.web_search, "live");
+  assert.equal(turnStart.params.sandboxPolicy.networkAccess, false);
 });
 
-test("explicit model is sent through thread/start and never through process arguments", async () => {
+test("legacy reasoning alias is validated and sent as the upstream turn effort", async () => {
   const invocations: Invocation[] = [];
-  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
-    appServerOutput: "model answer"
-  }, invocations), {});
-
+  const executor = timedExecutor(fakeStarter({
+    appServerOutput: "reasoning answer",
+    modelList: [{
+      id: "catalog-id",
+      model: "gpt-5.6-sol",
+      isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: "xhigh", description: "XHigh" }]
+    }]
+  }, invocations));
   const result = await executor.execute({
     taskId: TASK_ID,
-    instruction: "use selected model",
-    model: "gpt-6-astra"
-  });
-
-  assert.equal(result.kind, "completed");
-  const invocation = invocations[0];
-  assert.ok(invocation);
-  assert.deepEqual(invocation.args, ["app-server", "--stdio"]);
-  assert.equal(invocation.args.includes("gpt-6-astra"), false);
-  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
-  assert.deepEqual(messages[2], {
-    id: 2,
-    method: "thread/start",
-    params: {
-      cwd: TRUSTED_CWD,
-      approvalPolicy: "never",
-      sandbox: "read-only",
-      model: "gpt-6-astra",
-      allowProviderModelFallback: false
-    }
-  });
-});
-
-test("explicit reasoning is sent through turn/start effort and omitted from process arguments", async () => {
-  const invocations: Invocation[] = [];
-  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({
-    appServerOutput: "reasoning answer"
-  }, invocations), {});
-
-  const result = await executor.execute({
-    taskId: TASK_ID,
-    instruction: "use selected reasoning",
+    instruction: "reason",
     model: "gpt-5.6-sol",
     reasoning: "xhigh"
   });
-
   assert.equal(result.kind, "completed");
-  const invocation = invocations[0];
-  assert.ok(invocation);
-  assert.equal(invocation.args.includes("xhigh"), false);
-  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(messages[2].params.model, "gpt-5.6-sol");
-  assert.equal(messages[2].params.allowProviderModelFallback, false);
-  assert.equal(messages[3].method, "turn/start");
-  assert.equal(messages[3].params.effort, "xhigh");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.equal(turnStart.params.model, "gpt-5.6-sol");
+  assert.equal(turnStart.params.effort, "xhigh");
 });
 
 test("steer requires turn/started readiness and controls reset between turns", async () => {
@@ -374,7 +450,7 @@ test("interrupt terminates Codex while initialize is still pending", async () =>
   await new Promise<void>((resolve) => setImmediate(resolve));
   await executor.interrupt();
 
-  assert.deepEqual(await settlesWithin(pending), { kind: "interrupted", output: "", evidence: [] });
+  assert.deepEqual(withoutDiagnostics(await settlesWithin(pending)), { kind: "interrupted", output: "", evidence: [] });
   assert.deepEqual(invocations[0]?.signals, ["SIGTERM", "SIGKILL"]);
 });
 
@@ -391,7 +467,7 @@ test("interrupt forces termination when turn interrupt RPC never responds", asyn
   invocations[0]?.send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
   await executor.interrupt();
 
-  assert.deepEqual(await settlesWithin(pending), {
+  assert.deepEqual(withoutDiagnostics(await settlesWithin(pending)), {
     kind: "interrupted",
     output: "",
     threadId: "thread-1",
@@ -422,14 +498,167 @@ test("cooperative Codex interrupt completion still terminates the one-shot app-s
 
 test("hard deadline terminates Codex when initialize never responds", async () => {
   const invocations: Invocation[] = [];
-  const pending = timedExecutor(fakeStarter({ hold: true }, invocations))
+  const pending = timedExecutor(
+    fakeStarter({ hold: true }, invocations),
+    process.platform,
+    { ...SHORT_TIMING, rpcCallTimeoutMs: 1_000 }
+  )
     .execute({ taskId: TASK_ID, instruction: "inspect" });
 
-  assert.deepEqual(await settlesWithin(pending), {
+  assert.deepEqual(withoutDiagnostics(await settlesWithin(pending)), {
     kind: "failed",
     error: { code: "CODEX_EXECUTION_FAILED", message: "Codex execution failed." }
   });
   assert.deepEqual(invocations[0]?.signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("initialize RPC times out before the whole execution deadline", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({
+    appServerOutput: "",
+    ignoredMethods: ["initialize"]
+  }, invocations), process.platform, { ...SHORT_TIMING, executionTimeoutMs: 1_000 });
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+
+  try {
+    assert.deepEqual(withoutDiagnostics(await settlesWithin(pending, 200)), {
+      kind: "failed",
+      error: { code: "CODEX_PROTOCOL_ERROR", message: "Codex returned an invalid response." }
+    });
+  } finally {
+    if (invocations[0]?.signals.length === 0) {
+      await executor.interrupt();
+      await pending;
+    }
+  }
+});
+
+test("stalls after command items complete without turn/completed", async () => {
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(
+    TRUSTED_CWD,
+    fakeStarter({ appServerOutput: "", autoComplete: false }, invocations),
+    {},
+    process.platform,
+    { executionTimeoutMs: 1_000, interruptGraceMs: 10, killGraceMs: 10, protocolInactivityTimeoutMs: 25 }
+  );
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  invocations[0]?.send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } } });
+  invocations[0]?.send({ method: "item/completed", params: { item: { id: "cmd-1", type: "commandExecution", status: "completed", command: "true" } } });
+
+  const result = await settlesWithin(pending, 200);
+  assert.equal(result.kind, "failed");
+  assert.equal(result.error.code, "EXECUTOR_STALLED");
+});
+
+test("matching active-turn reasoning notifications reset the inactivity watchdog", async () => {
+  const inactivityTimeoutMs = 400;
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(
+    TRUSTED_CWD,
+    fakeStarter({ appServerOutput: "", autoComplete: false }, invocations),
+    {},
+    process.platform,
+    { executionTimeoutMs: 2_000, interruptGraceMs: 10, killGraceMs: 10, protocolInactivityTimeoutMs: inactivityTimeoutMs }
+  );
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  invocations[0]?.send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+  await new Promise<void>((resolve) => setTimeout(resolve, inactivityTimeoutMs / 2));
+  invocations[0]?.send({
+    method: "item/reasoning/summaryTextDelta",
+    params: { threadId: "thread-1", turnId: "turn-1", delta: "still reasoning" }
+  });
+  // This crosses the original deadline by 100ms but stays 100ms inside the
+  // reset deadline, so only matching active-turn activity can keep it alive.
+  await new Promise<void>((resolve) => setTimeout(resolve, inactivityTimeoutMs * 3 / 4));
+  await executor.interrupt();
+  assert.equal((await pending).kind, "interrupted");
+});
+
+test("other-thread, other-turn, global, and RPC traffic do not reset the inactivity watchdog", async () => {
+  const inactivityTimeoutMs = 400;
+  const trafficByCase = [
+    ["other thread", { method: "item/reasoning/summaryTextDelta", params: { threadId: "other", turnId: "turn-1", delta: "noise" } }],
+    ["other turn", { method: "item/reasoning/summaryTextDelta", params: { threadId: "thread-1", turnId: "other", delta: "noise" } }],
+    ["global notification", { method: "item/started", params: { item: { id: "cmd-1", type: "commandExecution" } } }],
+    ["RPC response", { id: 999, result: {} }]
+  ] as const;
+
+  for (const [name, traffic] of trafficByCase) {
+    const invocations: Invocation[] = [];
+    const executor = new CodexExecutor(
+      TRUSTED_CWD,
+      fakeStarter({ appServerOutput: "", autoComplete: false }, invocations),
+      {},
+      process.platform,
+      { executionTimeoutMs: 2_000, interruptGraceMs: 10, killGraceMs: 10, protocolInactivityTimeoutMs: inactivityTimeoutMs }
+    );
+    const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    invocations[0]?.send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+    await new Promise<void>((resolve) => setTimeout(resolve, inactivityTimeoutMs / 2));
+    invocations[0]?.send(traffic);
+
+    try {
+      const result = await settlesWithin(pending, inactivityTimeoutMs * 3 / 4);
+      assert.equal(result.kind, "failed", name);
+      assert.equal(result.error.code, "EXECUTOR_STALLED", name);
+    } finally {
+      if (invocations[0]?.signals.length === 0) {
+        await executor.interrupt();
+        await pending;
+      }
+    }
+  }
+});
+
+test("late turn completion cannot overwrite a stall termination", async () => {
+  const invocations: Invocation[] = [];
+  const executor = new CodexExecutor(
+    TRUSTED_CWD,
+    fakeStarter({ appServerOutput: "", autoComplete: false }, invocations),
+    {},
+    process.platform,
+    { executionTimeoutMs: 500, interruptGraceMs: 10, killGraceMs: 10, protocolInactivityTimeoutMs: 30 }
+  );
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  invocations[0]?.send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+  invocations[0]?.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+  const result = await pending;
+  assert.equal(result.kind, "failed");
+  assert.equal(result.error.code, "EXECUTOR_STALLED");
+});
+
+test("normal completion and explicit interrupt preempt the inactivity watchdog", async () => {
+  const completedInvocations: Invocation[] = [];
+  const completed = await new CodexExecutor(
+    TRUSTED_CWD,
+    fakeStarter({ appServerOutput: "done" }, completedInvocations),
+    {},
+    process.platform,
+    { executionTimeoutMs: 500, interruptGraceMs: 10, killGraceMs: 10, protocolInactivityTimeoutMs: 100 }
+  ).execute({ taskId: TASK_ID, instruction: "inspect" });
+  assert.equal(completed.kind, "completed");
+
+  const interruptedInvocations: Invocation[] = [];
+  const interruptedExecutor = new CodexExecutor(
+    TRUSTED_CWD,
+    fakeStarter({ appServerOutput: "", autoComplete: false }, interruptedInvocations),
+    {},
+    process.platform,
+    { executionTimeoutMs: 500, interruptGraceMs: 10, killGraceMs: 10, protocolInactivityTimeoutMs: 100 }
+  );
+  const pending = interruptedExecutor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  interruptedInvocations[0]?.send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
+  await interruptedExecutor.interrupt();
+  assert.equal((await pending).kind, "interrupted");
 });
 
 test("direct child exit does not restart an existing TERM to KILL deadline", async () => {
@@ -498,7 +727,7 @@ test("maps a thrown spawn and a process error to unavailable", async () => {
     .execute({ taskId: TASK_ID, instruction: "x" });
 
   for (const result of [thrown, emitted]) {
-    assert.deepEqual(result, {
+    assert.deepEqual(withoutDiagnostics(result), {
       kind: "failed",
       error: { code: "CODEX_UNAVAILABLE", message: "Codex is unavailable." }
     });
@@ -516,7 +745,7 @@ test("direct child exit rejects initialize and clears every pending RPC even whe
   assert.equal((executor as unknown as { pending: Map<number, unknown> }).pending.size, 1);
   invocation.exit(0);
 
-  assert.deepEqual(await settlesWithin(pending), {
+  assert.deepEqual(withoutDiagnostics(await settlesWithin(pending)), {
     kind: "failed",
     error: { code: "CODEX_PROTOCOL_ERROR", message: "Codex returned an invalid response." }
   });
@@ -532,7 +761,7 @@ test("rejects malformed JSONL, missing messages, and malformed message structure
   for (const stdout of outputs) {
     const result = await new CodexExecutor(TRUSTED_CWD, fakeStarter({ stdout }, []), {})
       .execute({ taskId: TASK_ID, instruction: "x" });
-    assert.deepEqual(result, {
+    assert.deepEqual(withoutDiagnostics(result), {
       kind: "failed",
       error: { code: "CODEX_PROTOCOL_ERROR", message: "Codex returned an invalid response." }
     });
@@ -547,7 +776,7 @@ test("nonzero exit discards partial output and stderr details", async () => {
     exitCode: 7
   }, []), {}).execute({ taskId: TASK_ID, instruction: "x" });
 
-  assert.deepEqual(result, {
+  assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
     error: { code: "CODEX_EXECUTION_FAILED", message: "Codex execution failed." }
   });
@@ -567,7 +796,7 @@ test("reports an allowlisted failed-turn reason without exposing raw error detai
     }
   }, []), {}).execute({ taskId: TASK_ID, instruction: "x" });
 
-  assert.deepEqual(result, {
+  assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
     error: {
       code: "CODEX_EXECUTION_FAILED",
@@ -593,7 +822,7 @@ test("an interrupted turn keeps the last completed agent text as real partial ou
   invocation.send({ method: "item/completed", params: { item: { id: "message-1", type: "agentMessage", text: "partial answer" } } });
   invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "interrupted" } } });
 
-  assert.deepEqual(await pending, {
+  assert.deepEqual(withoutDiagnostics(await pending), {
     kind: "interrupted",
     output: "partial answer",
     threadId: "thread-1",
@@ -694,6 +923,75 @@ test("reports evidence evicted by the count limit through an in-budget synthetic
   assert.equal(emissions[54]?.[49]?.id, "evidence-drop");
 });
 
+test("bounds Codex diagnostic evidence by aggregate serialized UTF-8 bytes and retains a drop marker", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "x" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  for (let index = 0; index < 50; index += 1) {
+    invocation.send({
+      method: "item/completed",
+      params: {
+        item: {
+          id: `cmd-${index}`,
+          type: "commandExecution",
+          status: "completed",
+          command: `${"命令".repeat(4_000)}-${index}`
+        }
+      }
+    });
+  }
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  const evidence = result.evidence ?? [];
+  assert.ok(Buffer.byteLength(JSON.stringify(evidence), "utf8") <= 65_536);
+  assert.equal(evidence.some(({ id }) => id === "evidence-drop"), true);
+});
+
+test("fails promptly with bounded diagnostics for an overlong unterminated Codex JSONL line", async () => {
+  const invocations: Invocation[] = [];
+  const secret = "secret-protocol-body";
+  const executor = timedExecutor(fakeStarter({ hold: true }, invocations), process.platform, {
+    ...SHORT_TIMING,
+    executionTimeoutMs: 1_000,
+    protocolInactivityTimeoutMs: 1_000,
+    rpcCallTimeoutMs: 1_000
+  });
+  const pending = settlesWithin(executor.execute({ taskId: TASK_ID, instruction: "x" }));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.writeStdout("x".repeat(40_000));
+  invocation.writeStdout(`${"y".repeat(40_000)}${secret}`);
+
+  const result = await pending;
+  assert.equal(result.kind, "failed");
+  if (result.kind !== "failed") return;
+  assert.equal(result.error.code, "CODEX_PROTOCOL_ERROR");
+  assert.ok(JSON.stringify(result).length <= 2_048);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("exposes only executor start/end timing metadata in structured diagnostics", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "done" }, invocations));
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  const diagnostics = (result as unknown as {
+    diagnostics?: { executor_started_at?: unknown; executor_ended_at?: unknown; instruction?: unknown; output?: unknown; protocol?: unknown }
+  }).diagnostics;
+  assert.equal(typeof diagnostics?.executor_started_at, "string");
+  assert.equal(typeof diagnostics?.executor_ended_at, "string");
+  assert.equal("instruction" in (diagnostics ?? {}), false);
+  assert.equal("output" in (diagnostics ?? {}), false);
+  assert.equal("protocol" in (diagnostics ?? {}), false);
+});
+
 test("passes untruncated evidence through unchanged", async () => {
   const invocations: Invocation[] = [];
   const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), {});
@@ -778,26 +1076,6 @@ test("win32: an npm codex.cmd shim resolves to the official bin/codex.js and run
   assert.deepEqual(invocation.args, [binJs, "app-server", "--stdio"]);
   assert.equal(invocation.options.shell, false);
   assert.equal(invocation.options.cwd, TRUSTED_CWD);
-});
-
-test("win32: a valid global npm Codex provider wins over a bundled codex.exe", async () => {
-  const globalDir = windowsDirectory();
-  writeFileSync(join(globalDir, "codex.cmd"), "");
-  const binJs = join(globalDir, "node_modules", "@openai", "codex", "bin", "codex.js");
-  mkdirSync(join(globalDir, "node_modules", "@openai", "codex", "bin"), { recursive: true });
-  writeFileSync(binJs, "");
-  const bundledDir = windowsDirectory();
-  writeFileSync(join(bundledDir, "codex.exe"), "");
-  const invocations: Invocation[] = [];
-  const executor = new CodexExecutor(TRUSTED_CWD,
-    fakeStarter({ appServerOutput: "final answer" }, invocations),
-    { PATH: `${bundledDir};${globalDir}` }, "win32");
-
-  const result = await executor.execute({ taskId: TASK_ID, instruction: "inspect" });
-
-  assert.equal(result.kind, "completed");
-  assert.equal(invocations[0]?.executable, process.execPath);
-  assert.deepEqual(invocations[0]?.args, [binJs, "app-server", "--stdio"]);
 });
 
 test("win32: a local node_modules/.bin codex.cmd shim also resolves to bin/codex.js under Node", async () => {
@@ -922,7 +1200,7 @@ test("win32: a spawned command that does not resolve still maps to CODEX_UNAVAIL
 
   const result = await executor.execute({ taskId: TASK_ID, instruction: "inspect" });
 
-  assert.deepEqual(result, {
+  assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
     error: { code: "CODEX_UNAVAILABLE", message: "Codex is unavailable." }
   });

@@ -19,6 +19,9 @@ export type ProcessStarter = (executable: string, args: readonly string[], optio
 const ENVIRONMENT_ALLOWLIST = ["PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "USER", "LOGNAME"] as const;
 const MAX_EVIDENCE = 50;
 const MAX_TEXT = 16_384;
+const MAX_EVIDENCE_BYTES = 65_536;
+const MAX_JSONL_LINE_BYTES = 65_536;
+const DEFAULT_RPC_CALL_TIMEOUT_MS = 30_000;
 // Official npm target of the Codex CLI, derived from a codex.cmd shim's
 // location so a Windows npm install can be launched through Node directly
 // (never through a shell).
@@ -28,7 +31,7 @@ const CODEX_NODE_TARGET = ["@openai", "codex", "bin", "codex.js"] as const;
 // entries that make list and count truncation visible.
 const TRUNCATION_MARKER = "[truncated]";
 
-function failure(code: "CODEX_UNAVAILABLE" | "CODEX_ACCOUNT_UNAVAILABLE" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED"): ExecutorResult {
+function failure(code: "CODEX_UNAVAILABLE" | "CODEX_ACCOUNT_UNAVAILABLE" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED" | "EXECUTOR_STALLED"): ExecutorResult {
   return { kind: "failed", error: serializeError(new CoreError(code)) };
 }
 function failedTurn(turn: Record<string, unknown>): ExecutorResult {
@@ -66,15 +69,27 @@ export class CodexExecutor implements Executor {
   private turnId: string | undefined;
   private startedTurnId: string | undefined;
   private nextId = 1;
-  private pending = new Map<number, { resolve: (value: unknown) => void; reject: () => void }>();
+  private pending = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: () => void;
+    timer: NodeJS.Timeout;
+  }>();
   private beginInterrupt: (() => void) | undefined;
 
   constructor(private readonly workspaceRoot: string, private readonly startProcess: ProcessStarter = spawn,
     private readonly hostEnvironment: Readonly<NodeJS.ProcessEnv> = process.env,
     private readonly platform: NodeJS.Platform = process.platform,
-    private readonly timing: ExecutorTiming = DEFAULT_EXECUTOR_TIMING) {}
+    private readonly timing: ExecutorTiming & { readonly rpcCallTimeoutMs?: number } = DEFAULT_EXECUTOR_TIMING) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
+    const executorStartedAt = new Date().toISOString();
+    const withDiagnostics = (result: ExecutorResult): ExecutorResult => ({
+      ...result,
+      diagnostics: {
+        executor_started_at: executorStartedAt,
+        executor_ended_at: new Date().toISOString()
+      }
+    });
     this.turnId = undefined;
     this.startedTurnId = undefined;
     let child: ChildProcessWithoutNullStreams;
@@ -90,14 +105,11 @@ export class CodexExecutor implements Executor {
         cwd: this.workspaceRoot, shell: false, stdio: ["pipe", "pipe", "pipe"],
         detached: this.platform !== "win32", env: childEnvironment
       };
-      // Windows: a valid global npm Codex installation is the primary provider
-      // even when a VS Code-bundled codex.exe is also visible on PATH. The
-      // global codex.cmd shim is resolved to the official bin/codex.js Node
-      // target and launched through Node directly. If that package-managed
-      // provider is absent/incomplete, normal direct-executable resolution is
-      // retained as the fallback. Nothing here goes through a shell, and the
-      // user instruction travels over stdin, never through the command line.
-      // Everywhere else (and as the Windows final fallback) the original bare
+      // Windows: a directly spawnable codex.exe is preferred; an npm-installed
+      // codex.cmd shim is resolved to the official bin/codex.js Node target and
+      // launched through Node directly. Nothing here goes through a shell, and
+      // the user instruction travels over stdin, never through the command
+      // line. Everywhere else (and as the Windows fallback) the original bare
       // "codex" spawn is unchanged.
       if (accountLaunch !== undefined) {
         child = this.startProcess(accountLaunch.executable, accountLaunch.args, options);
@@ -118,9 +130,12 @@ export class CodexExecutor implements Executor {
       this.child = child;
     } catch (error) {
       if (request.account !== undefined) {
-        return { kind: "failed", error: serializeError(error instanceof CoreError ? error : new CoreError("CODEX_ACCOUNT_UNAVAILABLE")) };
+        return withDiagnostics({
+          kind: "failed",
+          error: serializeError(error instanceof CoreError ? error : new CoreError("CODEX_ACCOUNT_UNAVAILABLE"))
+        });
       }
-      return failure("CODEX_UNAVAILABLE");
+      return withDiagnostics(failure("CODEX_UNAVAILABLE"));
     }
 
     const evidence = new Map<string, ExecutorEvidence>();
@@ -128,24 +143,32 @@ export class CodexExecutor implements Executor {
     let output = "";
     let buffer = "";
     let terminal: ((result: ExecutorResult) => void) | undefined;
-    let terminalPromise!: Promise<ExecutorResult>;
+    let terminalPromise: Promise<ExecutorResult>;
     terminalPromise = new Promise((resolve) => { terminal = resolve; });
     let settled = false;
     let directExited = false;
     let deadlineTimer: NodeJS.Timeout | undefined;
+    let inactivityTimer: NodeJS.Timeout | undefined;
     let interruptTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let exitImmediate: NodeJS.Immediate | undefined;
     let terminationResult: ExecutorResult | undefined;
     let killSignalled = false;
     const rejectPending = (): void => {
-      for (const waiter of this.pending.values()) waiter.reject();
+      for (const waiter of this.pending.values()) {
+        clearTimeout(waiter.timer);
+        waiter.reject();
+      }
       this.pending.clear();
     };
     const finish = (result: ExecutorResult): void => {
       if (settled) return;
+      const finalResult = terminationResult?.kind === "interrupted"
+        ? { ...terminationResult, output, evidence: visibleEvidence() }
+        : terminationResult ?? result;
       settled = true;
       if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       if (interruptTimer !== undefined) clearTimeout(interruptTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       if (exitImmediate !== undefined) clearImmediate(exitImmediate);
@@ -160,11 +183,9 @@ export class CodexExecutor implements Executor {
       // a cooperative interrupt completion. Settling the Bridge task must not
       // leave a detached process tree alive.
       if (accountRouted) {
-        // codex-switch owns a short stage -> startup-read -> auth restore
-        // transaction. Never TerminateProcess the wrapper on turn completion:
-        // that could strand the selected profile in live auth.json before its
-        // restore guard runs. Closing stdin gives the inherited app-server an
-        // EOF; the wrapper then finishes its restore and exits naturally.
+        // codex-switch performs a short auth stage/restore transaction around
+        // the inherited app-server. On normal completion, EOF lets the wrapper
+        // restore the original auth state before it exits.
         child.stdin.end();
       } else {
         if (!killSignalled) {
@@ -178,10 +199,10 @@ export class CodexExecutor implements Executor {
           killSignalled = true;
         }
         child.stdin.destroy();
-        child.stdout.destroy();
-        child.stderr.destroy();
       }
-      terminal?.(result);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      terminal?.(withDiagnostics(finalResult));
     };
     const stop = (result: ExecutorResult): void => {
       if (settled) return;
@@ -207,6 +228,13 @@ export class CodexExecutor implements Executor {
           command: `${evidenceDropped} evidence item(s) dropped: evidence limit exceeded`
         }];
     };
+    const enforceEvidenceBudget = (): void => {
+      while (evidence.size > 0 &&
+        Buffer.byteLength(JSON.stringify(visibleEvidence()), "utf8") > MAX_EVIDENCE_BYTES) {
+        evidence.delete(evidence.keys().next().value as string);
+        evidenceDropped += 1;
+      }
+    };
     const currentTerminationResult = (): ExecutorResult =>
       terminationResult?.kind === "interrupted"
         ? {
@@ -217,10 +245,8 @@ export class CodexExecutor implements Executor {
         }
         : terminationResult ?? failure("CODEX_EXECUTION_FAILED");
     const forceKill = (): void => {
-      if (!accountRouted) {
-        signalExecution(child, this.platform, "SIGKILL", !directExited);
-        killSignalled = true;
-      }
+      signalExecution(child, this.platform, "SIGKILL", !directExited);
+      killSignalled = true;
       finish(currentTerminationResult());
     };
     const sendTerm = (): void => {
@@ -231,8 +257,29 @@ export class CodexExecutor implements Executor {
     const beginTermination = (result: ExecutorResult, cooperativeMs: number): void => {
       if (settled || terminationResult !== undefined) return;
       terminationResult = result;
+      if (inactivityTimer !== undefined) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = undefined;
+      }
       if (cooperativeMs === 0) sendTerm();
       else interruptTimer = setTimeout(sendTerm, cooperativeMs);
+    };
+    const startInactivityWatchdog = (): void => {
+      if (settled || terminationResult !== undefined) return;
+      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(
+        () => beginTermination(failure("EXECUTOR_STALLED"), 0),
+        this.timing.protocolInactivityTimeoutMs ?? DEFAULT_EXECUTOR_TIMING.protocolInactivityTimeoutMs ?? 2 * 60_000
+      );
+    };
+    const resetInactivityWatchdog = (): void => {
+      if (inactivityTimer !== undefined) startInactivityWatchdog();
+    };
+    const activeTurnActivity = (params: Record<string, unknown>): boolean => {
+      return this.threadId !== undefined &&
+        this.startedTurnId !== undefined &&
+        params.threadId === this.threadId &&
+        params.turnId === this.startedTurnId;
     };
     this.beginInterrupt = () => {
       if (settled || terminationResult !== undefined) return;
@@ -266,20 +313,36 @@ export class CodexExecutor implements Executor {
       buffer += chunk;
       let newline: number;
       while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline).trim(); buffer = buffer.slice(newline + 1);
+        const rawLine = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (Buffer.byteLength(rawLine, "utf8") > MAX_JSONL_LINE_BYTES) {
+          finish(failure("CODEX_PROTOCOL_ERROR"));
+          return;
+        }
+        const line = rawLine.trim();
         if (!line) continue;
         let message: unknown;
         try { message = JSON.parse(line); } catch { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
         if (!object(message)) { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
         if (typeof message.id === "number" && ("result" in message || "error" in message)) {
           const waiter = this.pending.get(message.id);
-          if (waiter) { this.pending.delete(message.id); "error" in message ? waiter.reject() : waiter.resolve(message.result); }
+          if (waiter) {
+            this.pending.delete(message.id);
+            clearTimeout(waiter.timer);
+            "error" in message ? waiter.reject() : waiter.resolve(message.result);
+          }
           continue;
         }
         if (typeof message.method !== "string" || !object(message.params)) { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
+        if (activeTurnActivity(message.params)) resetInactivityWatchdog();
         if (message.method === "turn/started") {
           const turn = object(message.params.turn) ? message.params.turn : message.params;
-          if (message.params.threadId === this.threadId && typeof turn.id === "string" && (!this.turnId || turn.id === this.turnId)) this.startedTurnId = turn.id;
+          if (message.params.threadId === this.threadId &&
+            typeof turn.id === "string" &&
+            (!this.turnId || turn.id === this.turnId)) {
+            this.startedTurnId = turn.id;
+            startInactivityWatchdog();
+          }
         }
         const item = object(message.params.item) ? message.params.item : undefined;
         if ((message.method === "item/started" || message.method === "item/completed") && item) {
@@ -315,11 +378,15 @@ export class CodexExecutor implements Executor {
               evidence.delete(evidence.keys().next().value as string);
               evidenceDropped += 1;
             }
+            enforceEvidenceBudget();
             request.onEvidence?.(visibleEvidence());
           }
         }
         if (message.method === "turn/completed") {
           const turn = object(message.params.turn) ? message.params.turn : message.params;
+          if (message.params.threadId !== this.threadId ||
+            typeof turn.id !== "string" ||
+            turn.id !== (this.startedTurnId ?? this.turnId)) continue;
           const status = turn.status;
           const common = { threadId: this.threadId, evidence: visibleEvidence() };
           if (status === "failed") finish({ ...failedTurn(turn), ...common });
@@ -328,9 +395,13 @@ export class CodexExecutor implements Executor {
           else finish(failure("CODEX_PROTOCOL_ERROR"));
         }
       }
+      if (Buffer.byteLength(buffer, "utf8") > MAX_JSONL_LINE_BYTES) {
+        finish(failure("CODEX_PROTOCOL_ERROR"));
+      }
     });
     const finishFromExit = (code: number | null): void => {
       if (settled) return;
+      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       directExited = true;
       // The app-server can no longer answer. Reject RPC callers immediately;
       // descendant cleanup may continue for the bounded kill grace below.
@@ -361,19 +432,32 @@ export class CodexExecutor implements Executor {
     try {
       await this.call("initialize", { clientInfo: { name: "engineering-bridge", version: VERSION } });
       this.notify("initialized", {});
+      if (request.reasoning !== undefined && request.reasoning_effort !== undefined) {
+        throw new CoreError("UNSUPPORTED_ACTION");
+      }
+      const reasoningEffort = request.reasoning ?? request.reasoning_effort;
+      if (request.model !== undefined || reasoningEffort !== undefined) {
+        const modelResult = await this.call("model/list", {});
+        if (!object(modelResult) || !Array.isArray(modelResult.data)) throw new Error();
+        const models = modelResult.data.filter((entry): entry is Record<string, unknown> =>
+          object(entry) && typeof entry.model === "string"
+        );
+        const selected = request.model !== undefined
+          ? models.find((entry) => entry.model === request.model)
+          : models.find((entry) => entry.isDefault === true);
+        if (!selected) throw new CoreError("UNSUPPORTED_ACTION");
+        if (reasoningEffort !== undefined) {
+          const efforts = Array.isArray(selected.supportedReasoningEfforts)
+            ? selected.supportedReasoningEfforts
+            : [];
+          if (!efforts.some((effort) => object(effort) && effort.reasoningEffort === reasoningEffort)) {
+            throw new CoreError("UNSUPPORTED_ACTION");
+          }
+        }
+      }
       const sandbox = request.sandbox ?? "read-only";
       const threadParams: Record<string, unknown> = { cwd: this.workspaceRoot, approvalPolicy: "never", sandbox };
-      // Explicit model selection belongs to the native app-server protocol,
-      // not process arguments. A resumed Bridge task reuses the same native
-      // thread and therefore keeps the model selected when that thread began.
-      if (request.model !== undefined && request.threadId === undefined) {
-        threadParams.model = request.model;
-        threadParams.allowProviderModelFallback = false;
-      }
       if (request.webSearch === "live") {
-        // Native Codex web_search is a model tool, not shell/network access.
-        // Keep the OS sandbox network boundary disabled below; this config only
-        // enables the first-party live web search surface for read-only research.
         threadParams.config = { web_search: "live" };
       }
       if (request.threadId) threadParams.threadId = request.threadId;
@@ -384,22 +468,20 @@ export class CodexExecutor implements Executor {
         ? { type: "workspaceWrite", writableRoots: [this.workspaceRoot], networkAccess: false }
         : { type: "readOnly", networkAccess: false };
       const turnParams: Record<string, unknown> = {
-        threadId: this.threadId,
-        input: [{ type: "text", text: request.instruction }],
-        cwd: this.workspaceRoot,
-        approvalPolicy: "never",
-        sandboxPolicy
+        threadId: this.threadId, input: [{ type: "text", text: request.instruction }],
+        cwd: this.workspaceRoot, approvalPolicy: "never", sandboxPolicy
       };
-      // Codex app-server v2 exposes reasoning as turn/start `effort`. The
-      // schema states that the override applies to this and subsequent turns,
-      // so resumed task turns retain the requested effort without mutating the
-      // user's global config. Omission preserves native Codex defaults.
-      if (request.reasoning !== undefined) turnParams.effort = request.reasoning;
+      if (request.model !== undefined) turnParams.model = request.model;
+      if (reasoningEffort !== undefined) turnParams.effort = reasoningEffort;
       const turnResult = await this.call("turn/start", turnParams);
       if (!object(turnResult) || !object(turnResult.turn) || typeof turnResult.turn.id !== "string") throw new Error();
       this.turnId = turnResult.turn.id;
       if (this.startedTurnId !== this.turnId) this.startedTurnId = undefined;
-    } catch { if (!settled) finish(failure("CODEX_PROTOCOL_ERROR")); }
+    } catch (error) {
+      if (!settled) finish(error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+        ? { kind: "failed", error: serializeError(error) }
+        : failure("CODEX_PROTOCOL_ERROR"));
+    }
     return terminalPromise;
   }
 
@@ -415,8 +497,24 @@ export class CodexExecutor implements Executor {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (!this.child || this.child.stdin.destroyed) { reject(); return; }
-      this.pending.set(id, { resolve, reject: () => reject(new Error()) });
-      this.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      const rejectWaiter = (): void => reject(new Error());
+      const timer = setTimeout(() => {
+        const waiter = this.pending.get(id);
+        if (!waiter) return;
+        this.pending.delete(id);
+        clearTimeout(waiter.timer);
+        waiter.reject();
+      }, this.timing.rpcCallTimeoutMs ?? DEFAULT_RPC_CALL_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject: rejectWaiter, timer });
+      try {
+        this.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      } catch {
+        const waiter = this.pending.get(id);
+        if (!waiter) return;
+        this.pending.delete(id);
+        clearTimeout(waiter.timer);
+        waiter.reject();
+      }
     });
   }
   private notify(method: string, params: unknown): void { this.child?.stdin.write(`${JSON.stringify({ method, params })}\n`); }

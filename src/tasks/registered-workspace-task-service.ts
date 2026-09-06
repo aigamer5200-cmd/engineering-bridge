@@ -3,7 +3,7 @@ import { serializeError } from "../core/errors.js";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 import { CoreError } from "../core/errors.js";
-import type { Executor, ExecutorEvidence, ReasoningEffort } from "../executors/executor.js";
+import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort } from "../executors/executor.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
@@ -19,6 +19,7 @@ export interface RegisteredWorkspaceTaskRequest {
   readonly executor?: ExecutorName;
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
+  readonly reasoning_effort?: string;
   readonly account?: string;
   readonly web_research?: boolean;
   readonly preflight_receipt?: KnowledgePreflightReceipt;
@@ -28,16 +29,16 @@ type NormalizedRegisteredWorkspaceTaskRequest = RegisteredWorkspaceTaskRequest &
 
 function normalizeTaskRequest(request: RegisteredWorkspaceTaskRequest): NormalizedRegisteredWorkspaceTaskRequest {
   const executor = request.executor ?? "codex";
-  if (request.web_research === true && executor !== "codex") {
+  if (request.reasoning !== undefined && request.reasoning_effort !== undefined) {
     throw new CoreError("UNSUPPORTED_ACTION");
   }
-  if (request.model !== undefined && executor !== "codex") {
-    throw new CoreError("UNSUPPORTED_ACTION");
-  }
-  if (request.reasoning !== undefined && executor !== "codex") {
-    throw new CoreError("UNSUPPORTED_ACTION");
-  }
-  if (request.account !== undefined && executor !== "codex") {
+  if (executor !== "codex" && (
+    request.model !== undefined ||
+    request.reasoning !== undefined ||
+    request.reasoning_effort !== undefined ||
+    request.account !== undefined ||
+    request.web_research === true
+  )) {
     throw new CoreError("UNSUPPORTED_ACTION");
   }
   return { ...request, executor };
@@ -59,12 +60,30 @@ export type RegisteredWorkspaceTaskResult =
     readonly partial_output?: string | undefined;
   };
 
+export type ControlledPatchTaskRestore = {
+  readonly result: RegisteredWorkspaceTaskResult;
+  readonly pinned: boolean;
+  readonly executor?: ExecutorName | undefined;
+  readonly source?: "submitted" | undefined;
+};
+
 export type ExecutorFactory = (executor: ExecutorName, workspaceRoot: string) => Executor;
 export type CompletedOutputTransform = (output: string) => string;
 
 export type RegisteredWorkspaceTaskState = "queued" | "running" | "completed" | "failed";
 
 export type ControlledTaskState = RegisteredWorkspaceTaskState | "waiting_for_supervisor_review";
+export type ControlledTaskDiagnostics =
+  | (ExecutorDiagnostics & {
+    readonly finalization_started_at?: never;
+    readonly finalization_ended_at?: never;
+  })
+  | {
+    readonly finalization_started_at: string;
+    readonly finalization_ended_at: string;
+    readonly executor_started_at?: never;
+    readonly executor_ended_at?: never;
+  };
 export interface ControlledTaskView {
   readonly taskId: Id;
   readonly state: ControlledTaskState;
@@ -75,13 +94,9 @@ export interface ControlledTaskView {
   // A caller-submitted controlled patch has no executor at all: the view then
   // reports only source: "submitted" and never a codex/dsh identity.
   readonly executor?: ExecutorName | undefined;
-  // Present only when the caller explicitly pinned a Codex model for this
-  // task. Omitted means Codex owns default-model selection.
   readonly model?: string | undefined;
-  // Present only when an explicit Codex reasoning effort was requested.
   readonly reasoning?: ReasoningEffort | undefined;
-  // Present only when an explicit Codex account/profile was requested. This
-  // is routing evidence, not authentication material.
+  readonly reasoning_effort?: string | undefined;
   readonly account?: string | undefined;
   // Present only for caller-submitted controlled patches: the proposal was
   // provided by the caller, not produced by an executor.
@@ -92,6 +107,7 @@ export interface ControlledTaskView {
   readonly review_output?: string | undefined;
   readonly partial_output?: string | undefined;
   readonly evidence?: readonly ExecutorEvidence[];
+  readonly diagnostics?: ControlledTaskDiagnostics;
   readonly error?: SerializedError | undefined;
 }
 
@@ -100,14 +116,14 @@ export interface ControlledTaskView {
 // terminal record stores the result instead.
 type TaskRecord =
   | { state: "queued" | "running"; executor: ExecutorName; active?: Executor }
-  | { state: "completed" | "failed"; executor: ExecutorName | undefined; source?: "submitted"; result: RegisteredWorkspaceTaskResult };
+  | { state: "completed" | "failed"; executor: ExecutorName | undefined; source?: "submitted"; result: RegisteredWorkspaceTaskResult; diagnostics?: ControlledTaskDiagnostics };
 
 type NonTerminalTaskRecord = Extract<TaskRecord, { state: "queued" | "running" }>;
 
 type InteractiveRecord = {
   state: ControlledTaskState; request: NormalizedRegisteredWorkspaceTaskRequest; evidence: readonly ExecutorEvidence[];
   executor?: Executor | undefined; threadId?: string | undefined; output?: string | undefined;
-  partialOutput?: string | undefined; error?: SerializedError | undefined;
+  partialOutput?: string | undefined; diagnostics?: ExecutorDiagnostics | undefined; error?: SerializedError | undefined;
 };
 
 const MAX_TERMINAL_TASK_HISTORY = 100;
@@ -173,21 +189,45 @@ export class RegisteredWorkspaceTaskService {
     this.trimLegacyTerminalTasks();
   }
 
-  restoreControlledPatchTask(taskId: Id, output: string, pinned: boolean, executor: ExecutorName | undefined = "codex", source?: "submitted"): void {
-    if (this.tasks.has(taskId) || this.interactive.has(taskId)) {
-      throw new CoreError("INTERNAL_ERROR");
+  restoreControlledPatchTasks(restorations: readonly ControlledPatchTaskRestore[]): void {
+    if (restorations.length === 0) return;
+    const batchTaskIds = new Set<Id>();
+    for (const { result } of restorations) {
+      if (batchTaskIds.has(result.id) || this.tasks.has(result.id) || this.interactive.has(result.id)) {
+        throw new CoreError("INTERNAL_ERROR");
+      }
+      batchTaskIds.add(result.id);
     }
-    const result: RegisteredWorkspaceTaskResult = { id: taskId, state: "completed", output };
-    const record: TaskRecord = {
-      state: "completed",
-      executor: source === "submitted" ? undefined : executor ?? "codex",
-      ...(source === undefined ? {} : { source }),
-      result
-    };
-    this.tasks.set(taskId, record);
-    this.legacyTerminalTaskIds.push(taskId);
-    if (pinned) this.pinnedTaskIds.add(taskId);
+
+    for (const { result, pinned, executor, source } of restorations) {
+      const restoredExecutor = source === "submitted" ? undefined : executor ?? "codex";
+      const record: TaskRecord = result.state === "completed"
+        ? {
+          state: "completed",
+          executor: restoredExecutor,
+          ...(source === undefined ? {} : { source }),
+          result
+        }
+        : {
+          state: "failed",
+          executor: restoredExecutor,
+          ...(source === undefined ? {} : { source }),
+          result
+        };
+      this.tasks.set(result.id, record);
+      this.legacyTerminalTaskIds.push(result.id);
+      if (pinned) this.pinnedTaskIds.add(result.id);
+    }
     this.trimLegacyTerminalTasks();
+  }
+
+  restoreControlledPatchTask(taskId: Id, output: string, pinned: boolean, executor: ExecutorName | undefined = "codex", source?: "submitted"): void {
+    this.restoreControlledPatchTasks([{
+      result: { id: taskId, state: "completed", output },
+      pinned,
+      executor,
+      source
+    }]);
   }
 
   // Registers a caller-submitted controlled patch as a retained completed task
@@ -233,6 +273,7 @@ export class RegisteredWorkspaceTaskService {
         state: legacy.result.state,
         ...(legacy.executor === undefined ? {} : { executor: legacy.executor }),
         ...(legacy.source === undefined ? {} : { source: legacy.source }),
+        ...(legacy.diagnostics === undefined ? {} : { diagnostics: legacy.diagnostics }),
         ready: true
       };
       return legacy.result.state === "completed"
@@ -249,9 +290,11 @@ export class RegisteredWorkspaceTaskService {
       executor: record.request.executor,
       ...(record.request.model === undefined ? {} : { model: record.request.model }),
       ...(record.request.reasoning === undefined ? {} : { reasoning: record.request.reasoning }),
+      ...(record.request.reasoning_effort === undefined ? {} : { reasoning_effort: record.request.reasoning_effort }),
       ...(record.request.account === undefined ? {} : { account: record.request.account }),
       evidence: record.evidence,
-      ...(record.threadId === undefined ? {} : { threadId: record.threadId })
+      ...(record.threadId === undefined ? {} : { threadId: record.threadId }),
+      ...(record.diagnostics === undefined ? {} : { diagnostics: record.diagnostics })
     };
     if (record.state === "queued" || record.state === "running") return { ...base, ready: false };
     if (record.state === "waiting_for_supervisor_review") return { ...base, ready: true, review_output: record.output };
@@ -294,6 +337,7 @@ export class RegisteredWorkspaceTaskService {
         await this.executionReceipts?.remove(taskId);
       }
       record.request = { ...record.request, instruction };
+      record.diagnostics = undefined;
       record.state = "queued";
       this.observeState(taskId, record.request.executor, "queued");
       queueMicrotask(() => void this.executeInteractive(taskId));
@@ -352,10 +396,12 @@ export class RegisteredWorkspaceTaskService {
         executor: record.request.executor
       });
       const result = await executor.execute({ taskId, instruction,
-        sandbox: "read-only", threadId: record.threadId,
-        ...(record.request.model === undefined ? {} : { model: record.request.model }),
-        ...(record.request.reasoning === undefined ? {} : { reasoning: record.request.reasoning }),
-        ...(record.request.account === undefined ? {} : { account: record.request.account }),
+        sandbox: "read-only",
+        ...(record.threadId !== undefined ? { threadId: record.threadId } : {}),
+        ...(record.request.model !== undefined ? { model: record.request.model } : {}),
+        ...(record.request.reasoning !== undefined ? { reasoning: record.request.reasoning } : {}),
+        ...(record.request.reasoning_effort !== undefined ? { reasoning_effort: record.request.reasoning_effort } : {}),
+        ...(record.request.account !== undefined ? { account: record.request.account } : {}),
         ...(record.request.web_research === true ? { webSearch: "live" as const } : {}),
         onEvidence: (items) => {
           record.evidence = items;
@@ -380,6 +426,7 @@ export class RegisteredWorkspaceTaskService {
         record.state = "failed";
         record.error = interruptedError();
       } else {
+        record.diagnostics = result.diagnostics;
         record.output = result.output;
         await this.recordExecutionReceipt(
           taskId,
@@ -427,17 +474,19 @@ export class RegisteredWorkspaceTaskService {
           ? {
             taskId,
             instruction,
-            ...(request.model === undefined ? {} : { model: request.model }),
-            ...(request.reasoning === undefined ? {} : { reasoning: request.reasoning }),
-            ...(request.account === undefined ? {} : { account: request.account }),
+            ...(request.model !== undefined ? { model: request.model } : {}),
+            ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
+            ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
+            ...(request.account !== undefined ? { account: request.account } : {}),
             ...(request.web_research === true ? { webSearch: "live" as const } : {})
           }
           : {
             taskId,
             instruction,
-            ...(request.model === undefined ? {} : { model: request.model }),
-            ...(request.reasoning === undefined ? {} : { reasoning: request.reasoning }),
-            ...(request.account === undefined ? {} : { account: request.account }),
+            ...(request.model !== undefined ? { model: request.model } : {}),
+            ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
+            ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
+            ...(request.account !== undefined ? { account: request.account } : {}),
             ...(request.web_research === true ? { webSearch: "live" as const } : {}),
             onEvidence: (items) => this.observeEvidence(taskId, request.executor, items)
           }
@@ -460,13 +509,7 @@ export class RegisteredWorkspaceTaskService {
           ? { id: taskId, state: "failed", error: result.error }
           : interruptedTaskResult(taskId, result.output);
       if (taskResult.state === "completed" && receiptOperation !== undefined) {
-        await this.recordExecutionReceipt(
-          taskId,
-          request,
-          receiptOperation,
-          "completed",
-          workspaceRoot
-        );
+        await this.recordExecutionReceipt(taskId, request, receiptOperation, "completed", workspaceRoot);
       }
       await this.recordLegacyTerminalTask(taskId, taskResult, terminalTaskHandler);
     } catch (error) {
@@ -484,10 +527,24 @@ export class RegisteredWorkspaceTaskService {
     result: RegisteredWorkspaceTaskResult,
     terminalTaskHandler?: TerminalTaskHandler
   ): Promise<void> {
-    await terminalTaskHandler?.(result);
+    const finalizationStartedAt = new Date().toISOString();
+    let terminalResult: RegisteredWorkspaceTaskResult = result;
+    try {
+      await terminalTaskHandler?.(result);
+    } catch {
+      terminalResult = {
+        id: taskId,
+        state: "failed",
+        error: serializeError(new CoreError("INTERNAL_ERROR"))
+      };
+    }
+    const diagnostics: ControlledTaskDiagnostics = {
+      finalization_started_at: finalizationStartedAt,
+      finalization_ended_at: new Date().toISOString()
+    };
     const executor = this.tasks.get(taskId)?.executor ?? "codex";
-    this.tasks.set(taskId, { state: result.state, executor, result });
-    this.observeState(taskId, executor, result.state);
+    this.tasks.set(taskId, { state: terminalResult.state, executor, result: terminalResult, diagnostics });
+    this.observeState(taskId, executor, terminalResult.state);
     this.legacyTerminalTaskIds.push(taskId);
     this.trimLegacyTerminalTasks();
   }
@@ -542,13 +599,14 @@ export class RegisteredWorkspaceTaskService {
   ): Promise<void> {
     if (request.executor !== "codex" || this.executionReceipts === undefined) return;
     const workspaceRoot = knownWorkspaceRoot ?? this.registry.resolve(request.workspace_id);
+    const reasoning = receiptReasoning(request);
     await this.executionReceipts.record({
       taskId,
       workspaceId: request.workspace_id,
       workspaceRoot,
       executor: "codex",
       ...(request.model === undefined ? {} : { model: request.model }),
-      ...(request.reasoning === undefined ? {} : { reasoning: request.reasoning }),
+      ...(reasoning === undefined ? {} : { reasoning }),
       ...(request.account === undefined ? {} : { account: request.account }),
       operation,
       readOnly: true,
@@ -582,4 +640,12 @@ export class RegisteredWorkspaceTaskService {
     for (const taskId of evictedTaskIds) this.interactive.delete(taskId);
     this.interactiveTerminalTaskIds = terminalTaskIds.filter((taskId) => !evictedTaskIds.has(taskId));
   }
+}
+
+function receiptReasoning(request: RegisteredWorkspaceTaskRequest): ReasoningEffort | undefined {
+  const value = request.reasoning ?? request.reasoning_effort;
+  return value === "low" || value === "medium" || value === "high" ||
+    value === "xhigh" || value === "max" || value === "ultra"
+    ? value
+    : undefined;
 }

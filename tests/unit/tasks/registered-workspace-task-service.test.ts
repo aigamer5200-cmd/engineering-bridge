@@ -39,6 +39,12 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 }
+function withoutDiagnostics<T extends object>(value: T): Omit<T, "diagnostics"> {
+  const semantic = { ...value };
+  Reflect.deleteProperty(semantic, "diagnostics");
+  return semantic;
+}
+
 
 // Runs the real DshExecutor against a scripted child process, so interrupt
 // tests observe the actual partial-stdout caching path.
@@ -238,7 +244,7 @@ test("taskView polls a legacy runTask through completed output", async () => {
   pending.resolve({ kind: "completed", output: "proposal diff" });
   await waitForTerminal(service, taskId);
 
-  assert.deepEqual(service.taskView(taskId), {
+  assert.deepEqual(withoutDiagnostics(service.taskView(taskId)!), {
     taskId,
     state: "completed",
     executor: "codex",
@@ -285,6 +291,7 @@ test("applies a completed-output transform exactly once before storing the resul
 
 test("awaits a terminal handler exactly once before exposing completed output", async () => {
   const release = deferred<void>();
+  const handlerStarted = deferred<void>();
   let handlerCalls = 0;
   const executor: Executor = { execute: async () => ({ kind: "completed", output: "done" }) };
   const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
@@ -294,13 +301,12 @@ test("awaits a terminal handler exactly once before exposing completed output", 
     async (result) => {
       handlerCalls += 1;
       assert.equal(result.state, "completed");
+      handlerStarted.resolve(undefined);
       await release.promise;
     }
   );
 
-  while (handlerCalls === 0) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
+  await handlerStarted.promise;
 
   assert.equal(handlerCalls, 1);
   assert.deepEqual(service.status(taskId), { taskId, state: "running" });
@@ -315,6 +321,87 @@ test("awaits a terminal handler exactly once before exposing completed output", 
     state: "completed",
     output: "done"
   });
+});
+
+test("exposes finalization start/end timing around the terminal handler without bodies", async () => {
+  const handlerStarted = deferred<void>();
+  const releaseHandler = deferred<void>();
+  const executor: Executor = { execute: async () => ({ kind: "completed", output: "secret output" }) };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.runTask(
+    { workspace_id: "known", instruction: "secret instruction" },
+    undefined,
+    async () => {
+      handlerStarted.resolve();
+      await releaseHandler.promise;
+    }
+  );
+
+  await handlerStarted.promise;
+  const beforeFinalization = service.taskView(taskId) as Record<string, unknown> | undefined;
+  assert.equal(beforeFinalization?.state, "running");
+  releaseHandler.resolve();
+  await waitForTerminal(service, taskId);
+
+  const view = service.taskView(taskId) as (Record<string, unknown> & {
+    diagnostics?: Record<string, unknown>
+  }) | undefined;
+  const diagnostics = view?.diagnostics;
+  assert.equal(typeof diagnostics?.finalization_started_at, "string");
+  assert.equal(typeof diagnostics?.finalization_ended_at, "string");
+  assert.equal("instruction" in (diagnostics ?? {}), false);
+  assert.equal("output" in (diagnostics ?? {}), false);
+  assert.equal("protocol" in (diagnostics ?? {}), false);
+});
+
+test("records INTERNAL_ERROR exactly once when a terminal handler throws", async () => {
+  const release = deferred<void>();
+  const handlerStarted = deferred<void>();
+  let handlerCalls = 0;
+  const executor: Executor = { execute: async () => ({ kind: "completed", output: "done" }) };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.runTask(
+    { workspace_id: "known", instruction: "inspect" },
+    undefined,
+    async (result) => {
+      handlerCalls += 1;
+      assert.deepEqual(result, { id: taskId, state: "completed", output: "done" });
+      handlerStarted.resolve(undefined);
+      await release.promise;
+      throw new CoreError("WORKSPACE_PRECONDITION_FAILED");
+    }
+  );
+
+  await handlerStarted.promise;
+
+  assert.equal(handlerCalls, 1);
+  assert.deepEqual(service.status(taskId), { taskId, state: "running" });
+  assert.equal(service.result(taskId), undefined);
+
+  release.resolve(undefined);
+  await waitForTerminal(service, taskId);
+
+  assert.deepEqual(service.status(taskId), { taskId, state: "failed" });
+  assert.deepEqual(withoutDiagnostics(service.taskView(taskId)!), {
+    taskId,
+    state: "failed",
+    executor: "codex",
+    ready: true,
+    error: {
+      code: "INTERNAL_ERROR",
+      message: "The request could not be completed."
+    }
+  });
+  assert.deepEqual(service.result(taskId), {
+    id: taskId,
+    state: "failed",
+    error: {
+      code: "INTERNAL_ERROR",
+      message: "The request could not be completed."
+    }
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(handlerCalls, 1);
 });
 
 test("records executor failures", async () => {
@@ -457,6 +544,55 @@ test("an interrupted interactive task without any partial output omits the field
     code: "TASK_INTERRUPTED",
     message: "The task was interrupted."
   });
+});
+
+test("failed and interrupted interactive results do not expose executor diagnostics", async () => {
+  const results: ExecutorResult[] = [
+    {
+      kind: "failed",
+      error: { code: "CODEX_EXECUTION_FAILED", message: "Codex execution failed." },
+      diagnostics: {
+        executor_started_at: "2026-08-27T01:02:03.004Z",
+        executor_ended_at: "2026-08-27T01:02:04.005Z"
+      }
+    },
+    {
+      kind: "interrupted",
+      output: "partial",
+      diagnostics: {
+        executor_started_at: "2026-08-27T01:02:03.004Z",
+        executor_ended_at: "2026-08-27T01:02:04.005Z"
+      }
+    }
+  ];
+
+  for (const result of results) {
+    let firstRun = true;
+    const executor: Executor = {
+      execute: async () => {
+        if (!firstRun) return result;
+        firstRun = false;
+        return {
+          kind: "completed",
+          output: "review",
+          diagnostics: {
+            executor_started_at: "2026-08-27T01:02:01.002Z",
+            executor_ended_at: "2026-08-27T01:02:02.003Z"
+          }
+        };
+      }
+    };
+    const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+    const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect" });
+
+    await waitForInteractiveReady(service, taskId);
+    await service.controlTask(taskId, "continue", "retry");
+    await waitForInteractiveReady(service, taskId);
+
+    const view = service.taskView(taskId);
+    assert.equal(view?.state, "failed");
+    assert.equal("diagnostics" in (view ?? {}), false, result.kind);
+  }
 });
 
 test("run_task interrupt reaches TASK_INTERRUPTED after bounded DSH TERM and KILL without close", async () => {
@@ -621,6 +757,39 @@ test("taskView exposes the native Codex thread id once one exists and keeps it a
   await service.controlTask(taskId, "accept");
   assert.equal(service.taskView(taskId)?.executor, "codex");
   assert.equal(service.taskView(taskId)?.threadId, "thread-1");
+});
+
+test("interactive taskView preserves executor diagnostics through supervisor accept", async () => {
+  const executor: Executor = {
+    execute: async () => ({
+      kind: "completed",
+      output: "done",
+      diagnostics: {
+        executor_started_at: "2026-08-27T01:02:03.004Z",
+        executor_ended_at: "2026-08-27T01:02:04.005Z"
+      }
+    })
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect" });
+
+  await waitForInteractiveReady(service, taskId);
+
+  const reviewView = service.taskView(taskId);
+  assert.equal(reviewView?.state, "waiting_for_supervisor_review");
+  assert.deepEqual(reviewView?.diagnostics, {
+    executor_started_at: "2026-08-27T01:02:03.004Z",
+    executor_ended_at: "2026-08-27T01:02:04.005Z"
+  });
+
+  await service.controlTask(taskId, "accept");
+
+  const completedView = service.taskView(taskId);
+  assert.equal(completedView?.state, "completed");
+  assert.deepEqual(completedView?.diagnostics, {
+    executor_started_at: "2026-08-27T01:02:03.004Z",
+    executor_ended_at: "2026-08-27T01:02:04.005Z"
+  });
 });
 
 test("continue preserves the same native Codex thread id and passes it to the resumed turn", async () => {
@@ -870,6 +1039,75 @@ test("normalizes and fixes the executor selection for each interactive task", as
   ]);
 });
 
+test("forwards Codex model selection through legacy and interactive task paths", async () => {
+  const calls: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      calls.push(request);
+      return { kind: "completed", output: "done" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+
+  const legacy = service.runTask({
+    workspace_id: "known",
+    instruction: "legacy",
+    model: "gpt-5-codex",
+    reasoning_effort: "high"
+  } as Parameters<RegisteredWorkspaceTaskService["runTask"]>[0] & {
+    model: string;
+    reasoning_effort: string;
+  });
+  await waitForTerminal(service, legacy.taskId);
+
+  const interactive = service.startTask({
+    workspace_id: "known",
+    instruction: "interactive",
+    model: "gpt-5-codex",
+    reasoning_effort: "high"
+  } as Parameters<RegisteredWorkspaceTaskService["startTask"]>[0] & {
+    model: string;
+    reasoning_effort: string;
+  });
+  await waitForInteractiveReady(service, interactive.taskId);
+
+  assert.deepEqual(calls.map((request) => {
+    const selected = request as ExecutorRequest & { model?: string; reasoning_effort?: string };
+    return {
+      taskId: selected.taskId,
+      instruction: selected.instruction,
+      model: selected.model,
+      reasoning_effort: selected.reasoning_effort
+    };
+  }), [
+    { taskId: legacy.taskId, instruction: "legacy", model: "gpt-5-codex", reasoning_effort: "high" },
+    { taskId: interactive.taskId, instruction: "interactive", model: "gpt-5-codex", reasoning_effort: "high" }
+  ]);
+});
+
+test("rejects Codex-only selection fields for DSH tasks", () => {
+  const service = new RegisteredWorkspaceTaskService(registry(), () => ({
+    execute: async () => ({ kind: "completed", output: "unexpected" })
+  }));
+
+  assert.throws(() => service.runTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "dsh",
+    model: "gpt-5-codex"
+  } as Parameters<RegisteredWorkspaceTaskService["runTask"]>[0] & { model: string }), (error) =>
+    error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+  );
+  assert.throws(() => service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "dsh",
+    reasoning_effort: "high"
+  } as Parameters<RegisteredWorkspaceTaskService["startTask"]>[0] & { reasoning_effort: string }), (error) =>
+    error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+  );
+});
+
 test("records an unknown workspace asynchronously without creating an executor", async () => {
   let factories = 0;
   const service = new RegisteredWorkspaceTaskService(registry(), () => {
@@ -999,6 +1237,45 @@ test("restoreControlledPatchTask honors an explicit dsh executor and defaults le
   });
 });
 
+test("bulk controlled-patch restore validates the complete batch before installing any task", () => {
+  const service = new RegisteredWorkspaceTaskService(registry(), () => {
+    throw new Error("restored tasks must not execute");
+  });
+  const existingId = "00000000-0000-4000-8000-000000000001" as Id;
+  const freshId = "00000000-0000-4000-8000-000000000002" as Id;
+  service.restoreControlledPatchTask(existingId, "existing output", true, "codex");
+
+  assert.throws(
+    () => service.restoreControlledPatchTasks([
+      {
+        result: { id: freshId, state: "completed", output: "fresh output" },
+        pinned: true,
+        executor: "dsh"
+      },
+      {
+        result: {
+          id: existingId,
+          state: "failed",
+          error: { code: "APPLY_RECOVERY_CONFLICT", message: "conflict" }
+        },
+        pinned: false,
+        executor: "codex"
+      }
+    ]),
+    (error: unknown) => error instanceof CoreError && error.code === "INTERNAL_ERROR"
+  );
+
+  assert.equal(service.taskView(freshId), undefined);
+  assert.equal(service.result(freshId), undefined);
+  assert.deepEqual(service.taskView(existingId), {
+    taskId: existingId,
+    state: "completed",
+    executor: "codex",
+    ready: true,
+    output: "existing output"
+  });
+});
+
 test("control_task interrupt reaches a running legacy task's executor seam and finalizes as TASK_INTERRUPTED", async () => {
   let release!: (result: ExecutorResult) => void;
   const pending = new Promise<ExecutorResult>((done) => { release = done; });
@@ -1029,7 +1306,7 @@ test("control_task interrupt reaches a running legacy task's executor seam and f
     },
     partial_output: "partial diff"
   });
-  assert.deepEqual(service.taskView(taskId), {
+  assert.deepEqual(withoutDiagnostics(service.taskView(taskId)!), {
     taskId,
     state: "failed",
     executor: "codex",

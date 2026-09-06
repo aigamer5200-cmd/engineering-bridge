@@ -512,6 +512,38 @@ test("keeps draining and waits for the natural close after the output cap is exc
   assert.deepEqual(invocation.signals, []);
 });
 
+test("interrupt retains bounded head, marker, and true tail after stdout truncation", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ hold: true }, invocations));
+  const headSentinel = "INTERRUPTED-HEAD-SENTINEL";
+  const tailSentinel = "INTERRUPTED-TAIL-SENTINEL";
+  const stdout = Buffer.concat([
+    Buffer.from(headSentinel),
+    Buffer.alloc(MAX_OUTPUT_BYTES - Buffer.byteLength(headSentinel), 0x68),
+    Buffer.from(tailSentinel)
+  ]);
+  assert.equal(stdout.byteLength > MAX_OUTPUT_BYTES, true);
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  invocation.write(stdout);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await executor.interrupt();
+  invocation.close(7);
+
+  const result = await pending;
+  assert.equal(result.kind, "interrupted");
+  if (result.kind !== "interrupted") return;
+  assert.equal(result.output.startsWith(headSentinel), true);
+  assert.equal(result.output.split(TRUNCATION_MARKER).length - 1, 1);
+  assert.equal(result.output.endsWith(tailSentinel), true);
+  assert.equal(Buffer.byteLength(result.output), MAX_OUTPUT_BYTES);
+  assert.doesNotThrow(() =>
+    new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(result.output)));
+});
+
 test("repairs UTF-8 boundaries at both the retained head end and tail start", async () => {
   const character = Buffer.from("中");
   const stdout = Buffer.concat([

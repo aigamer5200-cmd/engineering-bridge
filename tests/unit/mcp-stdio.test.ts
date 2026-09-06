@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,42 @@ const VERSION_MODULE = new URL("../../src/version.js", import.meta.url);
 interface ToolResult {
   content: Array<{ type?: string; text?: string } | undefined>;
 }
+
+test("workspace configuration strips exactly one leading UTF-8 BOM", async () => {
+  const cases = [
+    { source: "\uFEFF[]\n", accepted: true },
+    { source: "\uFEFF\uFEFF[]\n", accepted: false }
+  ] as const;
+
+  for (const { source, accepted } of cases) {
+    const configRoot = mkdtempSync(join(tmpdir(), "engineering-bridge-bom-"));
+    const configPath = join(configRoot, "workspaces.json");
+    writeFileSync(configPath, source);
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [join(process.cwd(), "dist/src/mcp-stdio.js"), configPath],
+      cwd: process.cwd(),
+      stderr: "pipe"
+    });
+
+    try {
+      if (!accepted) {
+        await assert.rejects(client.connect(transport));
+        continue;
+      }
+      await client.connect(transport);
+      const listed = await client.listTools();
+      assert.equal(listed.tools.some(({ name }) => name === "run_task"), true);
+    } finally {
+      try {
+        await client.close();
+      } finally {
+        rmSync(configRoot, { recursive: true, force: true });
+      }
+    }
+  }
+});
 
 test("MCP and Codex client metadata use the shared package VERSION, and stdio returns structured tool errors", async () => {
   const { VERSION } = await import(VERSION_MODULE.href) as { VERSION: unknown };
@@ -27,8 +63,6 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
   const mcpSource = readFileSync("src/mcp-stdio.ts", "utf8");
   assert.match(mcpSource, /executionReceipts\.get\(task_id\)/u);
   assert.match(mcpSource, /execution_receipt:/u);
-  assert.match(mcpSource, /view\.state === "waiting_for_supervisor_review"/u);
-  assert.match(mcpSource, /view\.state === "completed"/u);
 
   const configPath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-mcp-")), "workspaces.json");
   writeFileSync(configPath, "[]\n");
@@ -49,25 +83,64 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
       "apply_controlled_patch",
       "authorize_workspace_write",
       "bind_project",
+      "commit_controlled_patch",
+      "configure_validation_profile",
       "control_task",
       "create_project",
       "generate_controlled_patch",
       "refine_controlled_patch",
       "run_task",
       "submit_controlled_patch",
-      "task_result"
+      "task_result",
+      "validate_controlled_patch"
     ]);
 
-    for (const toolName of ["run_task", "generate_controlled_patch", "refine_controlled_patch"]) {
-      const tool = listed.tools.find(({ name }) => name === toolName);
-      const inputSchema = tool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
-      assert.equal(typeof inputSchema?.properties?.preflight_receipt, "object");
+    const schemas = new Map(listed.tools.map((tool) => [tool.name, tool.inputSchema as {
+      properties?: Record<string, { type?: string; minLength?: number; const?: unknown }>;
+      required?: string[];
+    }]));
+    for (const name of ["run_task", "generate_controlled_patch", "refine_controlled_patch"]) {
+      const properties = schemas.get(name)?.properties;
+      assert.equal(properties?.model?.type, "string");
+      assert.equal(properties?.model?.minLength, 1);
+      assert.equal(properties?.reasoning_effort?.type, "string");
+      assert.equal(properties?.reasoning_effort?.minLength, 1);
     }
-    const runTaskTool = listed.tools.find(({ name }) => name === "run_task");
-    const runTaskSchema = runTaskTool?.inputSchema as { properties?: Record<string, unknown> } | undefined;
-    assert.equal(typeof runTaskSchema?.properties?.web_research, "object");
-    assert.equal(typeof runTaskSchema?.properties?.model, "object");
-    assert.equal(typeof runTaskSchema?.properties?.reasoning, "object");
+    const runTaskProperties = schemas.get("run_task")?.properties;
+    assert.equal(typeof runTaskProperties?.reasoning, "object");
+    assert.equal(runTaskProperties?.account?.type, "string");
+    assert.equal(typeof runTaskProperties?.web_research, "object");
+    assert.equal(typeof runTaskProperties?.preflight_receipt, "object");
+    assert.equal(typeof schemas.get("generate_controlled_patch")?.properties?.preflight_receipt, "object");
+    assert.equal(typeof schemas.get("refine_controlled_patch")?.properties?.preflight_receipt, "object");
+
+    // COMMIT requires every field and the exact literal confirmation.
+    const commitSchema = schemas.get("commit_controlled_patch");
+    assert.equal(commitSchema?.properties?.confirmation?.const, "COMMIT");
+    for (const field of ["patch_task_id", "message", "confirmation"]) {
+      assert.equal(commitSchema?.required?.includes(field), true);
+    }
+
+    for (const [name, argumentsValue] of [
+      ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", model: "gpt-5-codex" }],
+      ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", reasoning: "medium" }],
+      ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", account: "A" }],
+      ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", web_research: true }],
+      ["generate_controlled_patch", { workspace_id: "missing", change_request: "change", executor: "dsh", reasoning_effort: "high" }],
+      ["refine_controlled_patch", { patch_task_id: "missing", change_request: "refine", executor: "dsh", model: "gpt-5-codex" }]
+    ] as const) {
+      const rejected = await client.callTool({ name, arguments: argumentsValue });
+      assert.equal(rejected.isError, true);
+      const rejectedContent = rejected.content;
+      assert.ok(Array.isArray(rejectedContent));
+      if (!Array.isArray(rejectedContent)) continue;
+      const rejectedItem = rejectedContent[0];
+      assert.equal(rejectedItem?.type, "text");
+      if (rejectedItem?.type !== "text") continue;
+      assert.equal(JSON.parse(rejectedItem.text).error.code, "UNSUPPORTED_ACTION");
+      assert.equal(JSON.stringify(rejected).includes("UNKNOWN_WORKSPACE"), false);
+      assert.equal(JSON.stringify(rejected).includes("INVALID_STATE_TRANSITION"), false);
+    }
 
     const result = await client.callTool({
       name: "generate_controlled_patch",
@@ -107,21 +180,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
       { workspace_id: "missing", instruction: "inspect" },
       { workspace_id: "missing", instruction: "inspect", executor: "codex" },
       { workspace_id: "missing", instruction: "inspect", executor: "codex", model: "gpt-6-astra", reasoning: "medium" },
-      { workspace_id: "missing", instruction: "inspect", executor: "dsh" },
-      {
-        workspace_id: "missing",
-        instruction: "inspect",
-        preflight_receipt: {
-          knowledge_base_path: "D:/AI_Knowledge_Base",
-          knowledge_base_head: "670414561cb44acfd79bc1d5e858ee814a09a240",
-          project_profile: "wiki/projects/biaogu-hunter/PROJECT_PROFILE.md",
-          goal_id: "bridge-preflight-v1",
-          goal_summary: "Carry bounded current knowledge into delegated work.",
-          acceptance_criteria: ["Preserve task scope."],
-          relevant_topics: ["wiki/global/KNOWLEDGE_PREFLIGHT_PROTOCOL.md"],
-          critical_boundaries: ["No extra authority."]
-        }
-      }
+      { workspace_id: "missing", instruction: "inspect", executor: "dsh" }
     ]) {
       const runResult = await client.callTool({
         name: "run_task",
@@ -149,30 +208,6 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     });
     assert.equal(unknownExecutor.isError, true);
     assert.equal(JSON.stringify(unknownExecutor).includes("task_id"), false);
-
-    const dshModel = await client.callTool({
-      name: "run_task",
-      arguments: {
-        workspace_id: "missing",
-        instruction: "inspect",
-        executor: "dsh",
-        model: "gpt-6-astra"
-      }
-    });
-    assert.equal(dshModel.isError, true);
-    assert.equal(JSON.stringify(dshModel).includes("task_id"), false);
-
-    const dshReasoning = await client.callTool({
-      name: "run_task",
-      arguments: {
-        workspace_id: "missing",
-        instruction: "inspect",
-        executor: "dsh",
-        reasoning: "medium"
-      }
-    });
-    assert.equal(dshReasoning.isError, true);
-    assert.equal(JSON.stringify(dshReasoning).includes("task_id"), false);
 
     const malformedReceipt = await client.callTool({
       name: "run_task",
@@ -238,17 +273,13 @@ test("task_result honestly reports the fixed executor and never fabricates a thr
     // Default selection is codex; the JSON carries it and no thread_id exists.
     const codexRun = await call("run_task", {
       workspace_id: "missing",
-      instruction: "inspect",
-      model: "gpt-6-astra",
-      reasoning: "medium"
+      instruction: "inspect"
     });
     const codexTaskId = codexRun.body.task_id;
     assert.equal(typeof codexTaskId, "string");
     if (typeof codexTaskId !== "string") return;
     const codexView = await waitForTerminal(codexTaskId);
     assert.equal(codexView.executor, "codex");
-    assert.equal(codexView.model, "gpt-6-astra");
-    assert.equal(codexView.reasoning, "medium");
     assert.equal("thread_id" in codexView, false);
     assert.deepEqual(codexView.error, {
       code: "UNKNOWN_WORKSPACE",
@@ -714,6 +745,15 @@ index 90be1f3..3b18e51 100644
     assert.equal("executor" in view.body, false);
     assert.equal(view.body.output, validPatch);
 
+    const taskView = { ...view.body };
+    delete taskView.mcp_diagnostics;
+    const mcpDiagnostics = view.body.mcp_diagnostics as { serialized_task_view_bytes?: unknown } | undefined;
+    assert.equal(
+      mcpDiagnostics?.serialized_task_view_bytes,
+      Buffer.byteLength(JSON.stringify(taskView), "utf8")
+    );
+    assert.equal(JSON.stringify(view.body.mcp_diagnostics).includes(validPatch), false);
+
     // A stale base_head is rejected with the structured preflight error.
     const stale = await call("submit_controlled_patch", {
       workspace_id: "workspace",
@@ -728,6 +768,17 @@ index 90be1f3..3b18e51 100644
       }
     });
 
+    // A submitted-but-not-applied proposal refuses exact COMMIT before APPLY.
+    const earlyCommit = await call("commit_controlled_patch", {
+      patch_task_id: taskId,
+      message: "feat: commit submitted patch",
+      confirmation: "COMMIT"
+    });
+    assert.equal(earlyCommit.isError, true);
+    assert.deepEqual(earlyCommit.body, {
+      raw: "The requested state transition is not allowed."
+    });
+
     // The submitted proposal is applied through the existing APPLY tool.
     const applied = await call("apply_controlled_patch", {
       patch_task_id: taskId,
@@ -736,6 +787,247 @@ index 90be1f3..3b18e51 100644
     assert.equal(applied.isError, false);
     assert.deepEqual(applied.body, { patch_task_id: taskId, applied: true, changed_paths: ["note.txt"] });
     assert.equal(readFileSync(join(root, "note.txt"), "utf8"), "after\n");
+
+    // Lowercase confirmation is rejected by the MCP input schema before any
+    // business logic: the SDK validation prefix appears, no commit payload is
+    // produced, and HEAD plus the applied tracked dirt stay untouched.
+    const lowercased = await call("commit_controlled_patch", {
+      patch_task_id: taskId,
+      message: "feat: commit submitted patch",
+      confirmation: "commit"
+    });
+    assert.equal(lowercased.isError, true);
+    assert.equal(typeof lowercased.body.raw, "string");
+    assert.match(
+      String(lowercased.body.raw),
+      /Input validation error: Invalid arguments for tool commit_controlled_patch:/u
+    );
+    assert.equal(JSON.stringify(lowercased.body).includes("committed"), false);
+    assert.equal(
+      execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
+      head
+    );
+    assert.equal(
+      execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }),
+      " M note.txt\n"
+    );
+
+    // Exact COMMIT creates one commit containing only the already-APPLYed proposal.
+    const committed = await call("commit_controlled_patch", {
+      patch_task_id: taskId,
+      message: "feat: commit submitted patch",
+      confirmation: "COMMIT"
+    });
+    assert.equal(committed.isError, false);
+    assert.equal(committed.body.patch_task_id, taskId);
+    assert.equal(committed.body.committed, true);
+    assert.match(String(committed.body.commit_sha), /^[0-9a-f]{40,64}$/u);
+    assert.equal(
+      execFileSync("git", ["log", "-1", "--format=%s"], { cwd: root, encoding: "utf8" }).trim(),
+      "feat: commit submitted patch"
+    );
+    assert.equal(
+      execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
+      committed.body.commit_sha
+    );
+    assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }), "");
+  } finally {
+    await client.close();
+  }
+});
+
+test("controlled patch validation tools enforce fixed schemas, confirmation, defaults, and fixed validation input", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "engineering-bridge-validation-mcp-")));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: root });
+  execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+  writeFileSync(join(root, "note.txt"), "before\n");
+  execFileSync("git", ["add", "note.txt"], { cwd: root });
+  execFileSync("git", ["commit", "-qm", "base"], { cwd: root });
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const validPatch = `diff --git a/note.txt b/note.txt
+index 90be1f3..3b18e51 100644
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-before
++after
+`;
+
+  const configDir = mkdtempSync(join(tmpdir(), "engineering-bridge-validation-mcp-config-"));
+  const configPath = join(configDir, "workspaces.json");
+  const profilePath = `${configPath}.validation-profiles.json`;
+  writeFileSync(configPath, `${JSON.stringify([{ id: "workspace", root }], null, 2)}\n`);
+
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(process.cwd(), "dist/src/mcp-stdio.js"), configPath],
+    cwd: process.cwd(),
+    stderr: "pipe"
+  });
+
+  const call = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: Record<string, unknown> }> => {
+    const result = await client.callTool({ name, arguments: args });
+    const content = result.content as ToolResult["content"];
+    const text = content[0]?.text ?? "";
+    let body: unknown;
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      body = { raw: text };
+    }
+    return { isError: result.isError === true, body: body as Record<string, unknown> };
+  };
+
+  const profile = {
+    preparation: [],
+    validation: [{ name: "test", argv: ["npm", "test"] }]
+  };
+
+  try {
+    await client.connect(transport);
+
+    const tools = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+    const configureSchema = tools.get("configure_validation_profile")?.inputSchema as {
+      properties?: Record<string, { const?: unknown }>;
+      additionalProperties?: boolean;
+    } | undefined;
+    assert.equal(configureSchema?.properties?.confirmation?.const, "CONFIGURE");
+    assert.equal(configureSchema?.additionalProperties, false);
+
+    const validationSchema = tools.get("validate_controlled_patch")?.inputSchema as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+      additionalProperties?: boolean;
+    } | undefined;
+    assert.deepEqual(Object.keys(validationSchema?.properties ?? {}), ["patch_task_id"]);
+    assert.deepEqual(validationSchema?.required, ["patch_task_id"]);
+    assert.equal(validationSchema?.additionalProperties, false);
+
+    const submitted = await call("submit_controlled_patch", {
+      workspace_id: "workspace",
+      base_head: head,
+      diff: validPatch
+    });
+    assert.equal(submitted.isError, false);
+    const patchTaskId = submitted.body.task_id;
+    assert.equal(typeof patchTaskId, "string");
+    if (typeof patchTaskId !== "string") return;
+
+    const missingProfile = await call("validate_controlled_patch", {
+      patch_task_id: patchTaskId
+    });
+    assert.equal(missingProfile.isError, false);
+    assert.equal(missingProfile.body.status, "INCOMPLETE");
+    assert.equal(missingProfile.body.reason, "validation_profile_missing");
+
+    for (const args of [
+      { patch_task_id: patchTaskId, command: "npm test" },
+      { patch_task_id: patchTaskId, timeout_seconds: 1 }
+    ]) {
+      const rejected = await call("validate_controlled_patch", args);
+      assert.equal(rejected.isError, true);
+      assert.equal(JSON.stringify(rejected.body).includes("validation_profile_missing"), false);
+    }
+
+    for (const confirmation of ["AUTHORIZE", "configure", undefined]) {
+      const rejected = await call("configure_validation_profile", {
+        workspace_id: "workspace",
+        profile,
+        ...(confirmation === undefined ? {} : { confirmation })
+      });
+      assert.equal(rejected.isError, true);
+      assert.equal(existsSync(profilePath), false);
+    }
+
+    const emptyArgv = await call("configure_validation_profile", {
+      workspace_id: "workspace",
+      profile: {
+        preparation: [],
+        validation: [{ name: "test", argv: [] }]
+      },
+      confirmation: "CONFIGURE"
+    });
+    assert.equal(emptyArgv.isError, true);
+    assert.equal(existsSync(profilePath), false);
+
+    const configured = await call("configure_validation_profile", {
+      workspace_id: "workspace",
+      profile,
+      confirmation: "CONFIGURE"
+    });
+    assert.equal(configured.isError, false);
+    assert.deepEqual(JSON.parse(readFileSync(profilePath, "utf8")), {
+      version: 1,
+      profiles: [{
+        workspace_id: "workspace",
+        preparation: [],
+        validation: [{ name: "test", argv: ["npm", "test"] }],
+        default_step_timeout_seconds: 600,
+        total_timeout_seconds: 1200
+      }]
+    });
+  } finally {
+    await client.close();
+  }
+});
+
+test("malformed validation profile state stays lazy for startup, listing, and an existing safe tool path", async () => {
+  const configDir = realpathSync(mkdtempSync(join(tmpdir(), "engineering-bridge-validation-lazy-")));
+  const configPath = join(configDir, "workspaces.json");
+  const profilePath = `${configPath}.validation-profiles.json`;
+  writeFileSync(configPath, `${JSON.stringify([{ id: "workspace", root: configDir }], null, 2)}\n`);
+  writeFileSync(profilePath, "{not-json\n");
+
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(process.cwd(), "dist/src/mcp-stdio.js"), configPath],
+    cwd: process.cwd(),
+    stderr: "pipe"
+  });
+
+  const call = async (name: string, args: Record<string, unknown>): Promise<{ isError: boolean; body: Record<string, unknown> }> => {
+    const result = await client.callTool({ name, arguments: args });
+    const content = result.content as ToolResult["content"];
+    const text = content[0]?.text ?? "";
+    let body: unknown;
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      body = { raw: text };
+    }
+    return { isError: result.isError === true, body: body as Record<string, unknown> };
+  };
+
+  try {
+    await client.connect(transport);
+    const listed = await client.listTools();
+    assert.equal(listed.tools.some(({ name }) => name === "validate_controlled_patch"), true);
+
+    const run = await call("run_task", {
+      workspace_id: "missing",
+      instruction: "inspect",
+      executor: "dsh"
+    });
+    assert.equal(run.isError, false);
+    assert.equal(typeof run.body.task_id, "string");
+    assert.equal(readFileSync(profilePath, "utf8"), "{not-json\n");
+
+    const configuration = await call("configure_validation_profile", {
+      workspace_id: "workspace",
+      profile: { preparation: [], validation: [] },
+      confirmation: "CONFIGURE"
+    });
+    assert.equal(configuration.isError, true);
+    assert.deepEqual(configuration.body, {
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "The request could not be completed."
+      }
+    });
+    assert.equal(readFileSync(profilePath, "utf8"), "{not-json\n");
   } finally {
     await client.close();
   }

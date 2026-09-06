@@ -1,73 +1,18 @@
 # MCP tool reference
 
-This is the tool surface of Engineering Bridge V1. The local STDIO MCP server exposes ten tools.
-
-## Knowledge Preflight Receipt
-
-`run_task`, `generate_controlled_patch`, and `refine_controlled_patch` accept an optional `preflight_receipt` object with these bounded fields:
-
-- `knowledge_base_path`
-- `knowledge_base_head` (7-64 lowercase hexadecimal characters)
-- `project_profile`
-- optional `goal_id`
-- `goal_summary`
-- `acceptance_criteria`
-- `relevant_topics`
-- `critical_boundaries`
-
-The three list fields require 1-32 single-line values. Other receipt strings are also single-line and bounded. Bridge prepends this receipt to the selected executor's instruction and adds the actual registered `workspace_id`, registered workspace root, selected executor, and `sandbox: read-only` execution boundary.
-
-The receipt is delegation context, not an authority grant. It does not enable writes, credentials, network, release, or scope expansion. Bridge does not read or adjudicate the external Knowledge Base; the orchestrator remains responsible for preflight and current-rule selection. Omitting the receipt preserves the legacy executor instruction unchanged.
+This is the tool surface of Engineering Bridge V1 (1.4.2). The local STDIO MCP server exposes thirteen tools.
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional Codex-only `model`, optional Codex-only `reasoning`, optional Codex-only `account`, optional Codex-only `web_research`, optional `preflight_receipt`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), and optional Codex-only `model` and `reasoning_effort`.
 
-`account` is a task-scoped non-secret codex-switch profile alias. When omitted,
-Bridge uses the exact pre-existing native Codex path. When present, the alias
-must be included in the GOAL-provided account allowlist and the optional current
-codex-switch executable must be available; otherwise the account-routed task
-fails closed. `AUTO` is not accepted in the first slice. DSH plus `account`
-fails with `UNSUPPORTED_ACTION`.
-
-Account-routed tasks also require an absolute dedicated
-`ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME`. This isolation is separate
-from `ENGINEERING_BRIDGE_CODEX_SWITCH_HOME` and prevents the optional plug-in
-from importing or mutating the native Codex login/profile state.
-
-`reasoning` is an exact native Codex reasoning effort. Bridge maps it to
-app-server `turn/start.effort`; it is not passed as a shell/config guess. DSH
-plus `reasoning` fails with `UNSUPPORTED_ACTION`. Bridge never silently
-downgrades or substitutes a requested reasoning effort.
-
-`task_result` and `execution_receipt` expose only bounded non-secret routing
-provenance (`model`, `reasoning`, `account`) when explicitly requested. They
-never expose credentials and do not change sandbox/workspace/write/C/P/I/W/
-deployment/production authority.
-
-Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. For Codex, an explicit non-empty `model` is pinned at `thread/start` with provider model fallback disabled; an explicit `reasoning` is pinned at `turn/start.effort` and reused on subsequent turns. Omitting either preserves Codex's existing default selection. DSH plus any Codex-only routing field fails closed. Bridge never silently substitutes a different model/reasoning/account. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
+Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. Codex validates requested model/reasoning support through `model/list`; DSH rejects either option. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 
 ## `task_result`
 
-For a successful Codex task, `task_result` may include a Bridge-authored durable
-`execution_receipt` containing the exact registered `workspace_id`,
-`workspace_root`, `task_id`, executor=`codex`, Bridge operation,
-`read_only: true`, receipt state (`waiting_for_supervisor_review` or
-`completed`), and `recorded_at`. The receipt is persisted separately in
-`<config>.execution-receipts.json`, is bounded to the newest 500 valid records,
-contains no prompt/output text, and grants no write/release/acceptance
-authority. Shoestring GOAL uses this Bridge-authored record to reject caller
-self-attestation when closing a formal Codex Execution phase.
-
-If a reviewed Codex `run_task` is continued, the prior ready receipt is removed
-before the next turn starts. `task_result` exposes a receipt only when the
-current task state matches that receipt (`waiting_for_supervisor_review` or
-`completed`), so a running/failed continuation cannot surface stale evidence.
-DSH executions intentionally produce no Codex execution receipt.
-
 Input: `task_id`.
 
-Returns the task state, readiness, fixed `executor`, explicitly pinned `model`, `reasoning`, and `account` when requested, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.
+Returns the task state, readiness, fixed `executor`, and current bounded `evidence`. Queued and running tasks have `ready: false`. A successful turn has state `waiting_for_supervisor_review`, `ready: true`, and `review_output`. After acceptance, state is `completed` and the reviewed text is returned as `output`. Failures return a safe `{code,message}` error. An unknown task ID returns `UNKNOWN_TASK`.
 
 Conditional fields:
 
@@ -76,44 +21,18 @@ Conditional fields:
 
 `evidence` contains bounded command-execution and file-change items. When the existing bounds truncate or evict evidence, explicit markers are returned: strings cut by the size bound end with `[truncated]`, an oversized changes list gains a `[truncated: N additional changes omitted]` entry, and evidence evicted by the total count limit is reported through a synthetic `evidence-drop` item. These markers mean the diagnostic information is incomplete.
 
-For Shoestring GOAL specifically, Bridge's `waiting_for_supervisor_review` /
-`review_output` names describe transport state only. They do not assign a
-reviewer role to Codex. Web GPT + DS retain planning, architecture, execution
-direction, review/audit, repair, C/P, and authorized I/W authority; Codex only
-executes the bounded instruction and reports progress/results/problems.
-
-### Optional read-only task observer
-
-Bridge can expose the same bounded task activity to a local observer without
-creating a second controller. Set `ENGINEERING_BRIDGE_OBSERVER_MODE` before
-starting the MCP server:
-
-- unset / any other value: observer disabled (default);
-- `log`: append a bounded sidecar log at `<workspaces-config>.observer.log`;
-- `window`: use the same sidecar log and, on Windows, launch one detached
-  PowerShell window titled `Shoestring GOAL - Codex Observer` that tails it.
-  Non-Windows hosts degrade to log-only behavior.
-
-The observer records task id, selected executor, state transitions, native
-Codex thread id when available, bounded command evidence, and file-change
-paths/status. It never receives or writes the full task instruction/prompt and
-never writes diff contents. The sidecar is bounded to approximately 512 KiB and
-lives next to the external Bridge workspace configuration, not inside a target
-repository. Observer failures are best-effort/non-fatal and cannot steer,
-interrupt, accept, continue, or otherwise change task execution.
-
 ## `control_task`
 
 Inputs: `task_id`, `action`, and optional `instruction`.
 
 The actions are state-specific:
 
-- `continue`: while `waiting_for_supervisor_review`, requires a non-empty instruction, queues another read-only turn, and preserves app-server thread continuity with `thread/resume` for Codex. For DSH, `continue` starts a new headless execution; there is no native resume. If the task was started with a Knowledge Preflight Receipt, the same receipt is prepended to the continued turn while only the task instruction is replaced.
+- `continue`: while `waiting_for_supervisor_review`, requires a non-empty instruction, queues another read-only turn, and preserves app-server thread continuity with `thread/resume` for Codex. For DSH, `continue` starts a new headless execution; there is no native resume.
 - `steer`: while `running`, requires a non-empty instruction and steers the active turn (Codex only).
 - `interrupt`: while `running`, interrupts the active turn. When interruption completes, the task ends as `failed`; genuine partial output may be exposed as `partial_output`.
 - `accept`: while `waiting_for_supervisor_review`, marks the reviewed output `completed` without starting another turn.
 
-Invalid actions for the current state return `INVALID_STATE_TRANSITION`. There is no automatic timeout, automatic acceptance, or persistent task supervision state.
+Running generated/refined proposal tasks also accept `interrupt`, and Codex proposal tasks accept `steer`; completed proposal tasks do not accept any action. Invalid actions for the current state return `INVALID_STATE_TRANSITION`. Executor runs have a 15-minute hard deadline; active Codex turns also have a two-minute protocol-inactivity watchdog, reset only by an app-server notification whose `threadId` and `turnId` exactly match the active turn. Other threads, other turns, global notifications, and RPC responses do not reset it. Short Codex RPC calls have a separate 30-second bound. There is no automatic acceptance or persistent task supervision state.
 
 ## `bind_project`
 
@@ -135,24 +54,42 @@ Grants persistent controlled-write permission to one managed workspace only; man
 
 ## `generate_controlled_patch`
 
-Inputs: `workspace_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `preflight_receipt`.
+Inputs: `workspace_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`), and optional Codex-only `model` and `reasoning_effort`.
 
 Read-only proposal flow available in any registered workspace; no write authorization is required to generate. It verifies that the configured root resolves to the Git top-level and that tracked state and the index are clean (with an existing HEAD, or unborn-repository support for added-file proposals), records and returns `base_head`, and starts a separate read-only proposal task that does not modify files. The proposal and its applied history persist to `<config>.controlled-patches.json`.
 
 ## `refine_controlled_patch`
 
-Inputs: `patch_task_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `preflight_receipt`.
+Inputs: `patch_task_id`, `change_request`, optional `executor` (`"codex" | "dsh"`, default `codex`), and optional Codex-only `model` and `reasoning_effort`.
 
-Read-only refinement of a completed controlled-patch proposal: returns a new complete proposal against the same `base_head`, preserving the source proposal. The executor is selected per call and defaults to `codex`; it is not inherited from the parent proposal. The Knowledge Preflight Receipt is also selected per call and is not silently inherited from the parent proposal. Requires the source task to be `completed` and the workspace base to be unchanged. No write authorization is required; it never modifies files.
+Read-only refinement of a completed controlled-patch proposal: returns a new complete proposal against the same `base_head`, preserving the source proposal. The executor is selected per call and defaults to `codex`; it is not inherited from the parent proposal. Requires the source task to be `completed` and the workspace base to be unchanged. No write authorization is required; it never modifies files.
 
 ## `submit_controlled_patch`
 
 Inputs: `workspace_id`, `base_head`, `diff`.
 
-Registers a caller-provided complete unified text diff as a retained read-only proposal against exactly the current commit HEAD. No executor runs, so task reporting uses `source: "submitted"` and never fabricates an executor identity. The submitted diff must pass the same controlled-patch structural and workspace preflight used by APPLY. It does not modify files until a later exact `APPLY` call, and it does not accept a Knowledge Preflight Receipt because there is no executor delegation.
+Registers a caller-provided complete unified Git diff as a retained, already-completed read-only proposal. `base_head` must exactly equal the current commit HEAD, and the shared controlled-patch preflight verifies the workspace and diff before registration. No executor or model runs, so `task_result` reports `source: "submitted"` without an executor identity. Submission requires no write authorization; application still requires human review, write permission, exact `APPLY`, and all normal rechecks.
 
 ## `apply_controlled_patch`
 
 Inputs: `patch_task_id`, `confirmation`.
 
-The single controlled-write checkpoint. Confirmation must equal `APPLY` exactly, the proposal must be known, completed, and not already applied, and the workspace must hold controlled-write permission (managed `AUTHORIZE` or a manual `allow_write: true` entry). The tool rechecks the canonical Git root, clean tracked state and index, and exact base HEAD (including unborn-base validation) before validating and applying the patch once. It can modify existing tracked regular text files or add an absent ordinary text file from an exact 100644 text diff. A new target must be absent from base HEAD, the current index, and the worktree. It never tests, stages, commits, or pushes.
+The controlled file-application checkpoint. Confirmation must equal `APPLY` exactly, the proposal must be known, completed, and not already applied, and the workspace must hold controlled-write permission (managed `AUTHORIZE` or a manual `allow_write: true` entry). The tool rechecks the canonical Git root, clean tracked state and index, and exact base HEAD (including unborn-base validation) before validating and applying the patch once. It can modify existing tracked regular text files or add an absent ordinary text file from an exact 100644 text diff. A new target must be absent from base HEAD, the current index, and the worktree. It never tests, stages, commits, or pushes.
+
+## `commit_controlled_patch`
+
+Inputs: `patch_task_id`, `message`, `confirmation` (must equal `COMMIT` exactly).
+
+Creates one Git commit containing only an already-`APPLY`ed controlled patch. The patch task must identify a retained controlled proposal that has already been applied; `message` must be non-empty and the confirmation is exact and case-sensitive. The index must start clean, unrelated tracked or staged changes are rejected, and retained patch content is staged exactly. Pre-existing unignored untracked files outside the patch targets are allowed only when Bridge can safely fingerprint them under the workspace lock and match their complete path set and contents at later discrete verification checkpoints; new, removed, modified, replaced, or unsupported special paths fail closed. Existing tracked gitlink worktrees are scan boundaries, so Bridge does not recurse into them with superproject ignore rules. This checking is not continuous monitoring or a filesystem transaction. If Git creates the commit but final recovery-anchor verification fails, the call returns `WORKSPACE_PRECONDITION_FAILED` with HEAD already advanced; Bridge does not reset or rewrite history, and retrying the same proposal fails its original-base-HEAD check without another commit. Patch-added untracked targets remain controlled patch paths, while ignored paths retain their existing semantics and stay outside this snapshot. The commit step is separate from `APPLY`, does not imply any later gate, and never pushes.
+
+## `configure_validation_profile`
+
+Inputs: `workspace_id`, `profile`, `confirmation` (must equal `CONFIGURE` exactly).
+
+Replaces the fixed validation profile for one registered workspace. A profile contains ordered `preparation` and `validation` steps; each step is a non-empty argv array and optional timeout, never a shell string. The profile is persisted in the local `<config>.validation-profiles.json` sidecar. Configuration does not validate a proposal and does not authorize `APPLY` or `COMMIT`.
+
+## `validate_controlled_patch`
+
+Input: `patch_task_id`.
+
+Runs the retained proposal against the workspace validation profile in a temporary detached worktree after the normal controlled-patch preflight. Results are `PASS`, `FAIL`, or `INCOMPLETE`. Validation is optional and on-demand: it neither changes proposal state nor grants write permission, and the detached worktree protects the registered workspace from candidate build artifacts but is not a host-level sandbox. Unborn-base proposals return `INCOMPLETE` with `reason: "unsupported_unborn_base"`.

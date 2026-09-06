@@ -1,18 +1,18 @@
 import { spawn } from "node:child_process";
-import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
 import { lstat, mkdir, realpath, rmdir } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 import { CoreError } from "../core/errors.js";
+import {
+  runBoundedGit,
+  type GitProcessOptions,
+  type GitStarter
+} from "../executors/bounded-git-process.js";
 import { ManagedWorkspaceCatalog } from "./managed-workspace-catalog.js";
 import { RegisteredWorkspaceRegistry } from "./registered-workspace-registry.js";
 
 export type Canonicalizer = (path: string) => Promise<string>;
-export type GitStarter = (
-  executable: string,
-  args: readonly string[],
-  options: SpawnOptionsWithoutStdio
-) => ChildProcessWithoutNullStreams;
+export type { GitStarter };
 
 export interface BindWorkspaceResult {
   readonly workspace_id: string;
@@ -34,7 +34,8 @@ export class WorkspaceOnboardingService {
     private readonly catalog: ManagedWorkspaceCatalog,
     private readonly approvedRoots: readonly string[],
     private readonly canonicalize: Canonicalizer = realpath,
-    private readonly startProcess: GitStarter = spawn
+    private readonly startProcess: GitStarter = spawn,
+    private readonly gitProcessOptions: GitProcessOptions = {}
   ) {}
 
   async bind(request: { project_path: string }): Promise<BindWorkspaceResult> {
@@ -116,26 +117,17 @@ export class WorkspaceOnboardingService {
     return canonical;
   }
 
-  private git(cwd: string, args: readonly string[]): Promise<string> {
-    return new Promise((resolveOutput, reject) => {
-      let child: ChildProcessWithoutNullStreams;
-      try {
-        child = this.startProcess("git", args, { cwd, shell: false, stdio: ["pipe", "pipe", "pipe"] });
-      } catch {
-        reject(new CoreError("WORKSPACE_PRECONDITION_FAILED"));
-        return;
-      }
-      let stdout = "";
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-      child.stderr.resume();
-      child.on("error", () => reject(new CoreError("WORKSPACE_PRECONDITION_FAILED")));
-      child.on("close", (code) => code === 0
-        ? resolveOutput(stdout)
-        : reject(new CoreError("WORKSPACE_PRECONDITION_FAILED")));
-      child.stdin.on("error", () => reject(new CoreError("WORKSPACE_PRECONDITION_FAILED")));
-      child.stdin.end();
-    });
+  private async git(cwd: string, args: readonly string[]): Promise<string> {
+    const result = await runBoundedGit(
+      this.startProcess,
+      cwd,
+      args,
+      undefined,
+      () => new CoreError("WORKSPACE_PRECONDITION_FAILED"),
+      this.gitProcessOptions
+    );
+    if (result.code !== 0) throw new CoreError("WORKSPACE_PRECONDITION_FAILED");
+    return result.stdout;
   }
 }
 

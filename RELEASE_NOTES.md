@@ -1,161 +1,110 @@
 # Release notes
 
-## v1.2.1-biaogu.6 (custom fork) — explicit Codex model routing
+## v1.4.2-biaogu.1
 
-- `run_task` accepts an optional non-empty `model` for `executor=codex`.
-- The selected model is passed through native Codex app-server `thread/start`;
-  it is never placed in shell/process arguments.
-- `task_result` reports an explicitly pinned model for orchestration evidence.
-- The model remains fixed for the supervised task/native Codex thread,
-  including later `continue` turns on that thread.
-- `executor=dsh` plus `model` fails closed instead of ignoring the selection.
-- Omitting `model` preserves the previous default-model behavior.
-- Bridge does not implement silent model substitution or a hidden fallback
-  chain. Model routing grants no additional authority.
+This Biaogu integration release reconciles upstream `v1.4.2` into the current
+Shoestring GOAL Engineering Bridge fork while preserving the existing local
+GOAL execution contract and rollback boundary.
 
-## GOAL v3.1 source-alignment note (2026-08-30)
+### Biaogu integration
 
-- Task-local Bridge/Codex failures now distinguish seamless recovery from a
-  real execution stop: safe retry/fallback that keeps user-visible forward
-  progress continuous discards only the stale task/thread/child, preserves
-  healthy sibling tasks, keeps the Codex executor lane, and does not emit an
-  interruption Telegram or create a Human Gate. Telegram remains mandatory
-  when forward execution actually stops or yields before recovery.
-- Ordinary isolated-worktree Lane A/B mutation prefers project-authorized DS
-  `apply_patch`; Bridge controlled `APPLY` remains available only where the
-  project explicitly authorizes that lane, and the confirmation token itself
-  does not manufacture a Human Gate.
-- Parallel 2-4 Codex child fan-out remains an upper-layer Shoestring GOAL
-  orchestration decision; Bridge stays the formal entry/provenance transport
-  for each bounded Codex child and does not acquire reducer/reviewer authority.
-- This is source/recovery-handoff alignment only. It does not deploy or mutate
-  any production Bridge runtime or control copy.
+- Preserve task-scoped Codex account routing through the optional
+  `codex-switch` adapter, including isolated `CODEX_HOME` handling and explicit
+  fail-closed account selection.
+- Preserve exact model/reasoning routing, native live web research,
+  Knowledge Preflight Receipt injection, Bridge-authored execution receipts,
+  and the read-only task observer.
+- Keep the Windows global-npm Codex provider preference while retaining
+  upstream v1.4.2 executor liveness and controlled validation/commit behavior.
+- Add a Windows-safe fallback for upstream controlled-COMMIT untracked-file
+  fingerprinting when Node does not expose `O_NOFOLLOW`; POSIX continues to use
+  native `O_NOFOLLOW` semantics.
 
-## v1.2.1-biaogu.5 (custom fork) — bounded Codex live web research
+### Upgrade policy
 
-- `run_task` accepts optional `web_research: true` for the Codex executor only.
-- The option enables Codex native live Responses `web_search` while preserving the existing read-only workspace sandbox and `networkAccess: false` OS/shell boundary.
-- DSH rejects `web_research: true` instead of silently widening its execution mode.
-- Live-provider validation confirmed public web research works through the native tool without enabling shell networking.
-- This change grants research capability only. It does not grant write, upload, POST, credential, browser-control, deployment, or deletion authority.
+- The Owner selected the simplified upgrade path: no pre-promotion full
+  rollback drill is required, but the current `1.2.1-biaogu.6` runtime and
+  rollback capability must remain intact.
+- Promotion is allowed only after candidate/canary compatibility acceptance;
+  an actual production failure must downgrade to the retained previous runtime.
 
-## v1.2.1-biaogu.4 (custom fork)
+### Validation checkpoint
 
-This custom build promotes the read-only Shoestring GOAL Codex Observer already
-integrated on `main` into a distinct immutable runtime version. It preserves the
-`biaogu.3` Bridge/Codex execution behavior and the current Web GPT + DS / Codex
-role boundary.
+- Full upstream + fork unit suite: 377 tests, 372 passed, 0 failed, 5
+  Windows-specific platform skips.
+- Biaogu critical regression: 112 passed, 0 failed, covering account routing,
+  reasoning, live web research, execution receipts, MCP schema, and supervised
+  task behavior.
 
-- `ENGINEERING_BRIDGE_OBSERVER_MODE=log` enables bounded task observation in a
-  sidecar log; `window` additionally opens the detached Windows PowerShell
-  observer titled `Shoestring GOAL - Codex Observer`.
-- Windows `window` mode uses a per-log-path live-process lease so concurrent MCP
-  backend sessions reuse the same observer window instead of opening duplicate
-  PowerShell tails.
-- The observer is read-only and best-effort. It never becomes a controller,
-  planner, reviewer, repair authority, C/P authority, or I/W authority; Bridge
-  remains the sole Codex execution controller.
-- Observer output is intentionally bounded: task/executor/state, native thread
-  id, bounded command evidence, and changed-file paths only. Full task prompts,
-  result bodies, diff bodies, credentials, and secrets are not emitted.
-- The observer log is capped at approximately 512 KiB and observer failures are
-  non-fatal to Bridge task execution.
-- Observer mode remains environment-controlled so the same immutable runtime can
-  be canary-tested, switched, and rolled back through the existing painless
-  upgrade control plane.
-- The Biaogu production control plane runs bounded observation in `log` mode
-  while keeping the visible observer UI closed by default. The tail window may
-  be opened at the start of a task or midway through an existing task without
-  restarting Bridge or replacing the active Codex native thread; closing the
-  UI leaves bounded background logging active.
+## v1.4.2
 
-## v1.2.1-biaogu.3 (custom fork)
+v1.4.2 is a correctness release for controlled initial commits in fresh Git repositories with no existing commit.
 
-This custom build hardens the GOAL Codex single-entry contract on top of
-`biaogu.2` without changing the production topology or Codex execution profile.
+### Fixed
 
-- Recovery handoff now freezes the orchestration boundary that formal Codex
-  tasks enter only through Engineering Bridge; DS/shell direct Codex invocation
-  is diagnostic-only and cannot substitute for a Bridge task.
-- Task-local stalls (stdin/EOF, stale task/thread, internal delegation/memory,
-  Windows sandbox/SID/Git ownership, or write-authority conflicts) remain on the
-  Codex lane and recover through a fresh Bridge task instead of incorrectly
-  advancing the provider fallback chain.
-- Project-local mutation authority remains authoritative: DS-only-write
-  projects use Codex for read-only patch proposals, DS for application and
-  independent regression; generic Bridge controlled APPLY remains available
-  only where the project explicitly permits it.
-- Global npm -> bundled provider fallback is reserved for actual provider
-  unavailability; web-gpt-ds is reserved for provider-chain exhaustion or
-  token/capacity unavailability.
-- Successful Codex `run_task` and controlled-patch generate/refine executions
-  now emit Bridge-authored durable provenance into
-  `<config>.execution-receipts.json`; `task_result` exposes the matching bounded
-  receipt so Shoestring GOAL can verify exact workspace/task/operation/read-only
-  provenance instead of trusting caller self-attestation. The store is atomic,
-  serializes mutations, syncs the temporary file before rename, is capped at
-  500 records, contains no prompt/output text, and grants no write authority.
-  A Codex `continue` removes the previous ready receipt before the next turn so
-  a failed/running continuation cannot leave stale ready evidence behind; DSH
-  intentionally emits no Codex execution receipt.
+- Support controlled `COMMIT` for an applied proposal in a fresh/unborn Git repository, creating a root commit from exactly the proposal targets.
+- Preserve proposal-target-only staging and leave unrelated untracked recovery anchors unchanged, untracked, and unstaged.
+- Before creating the root commit, recheck the unborn state and expected branch ref so concurrent HEAD or ref creation is rejected.
+- After creating the root commit, verify that it has no parent, contains exactly the proposal paths, and leaves the index and tracked worktree clean.
+- If post-commit verification fails, report the failure without resetting, amending, or otherwise rewriting the commit that was already created.
 
-## v1.2.1-biaogu.2 (custom fork)
+### Compatibility
 
-This custom build keeps the upstream v1.2.1 Windows launch model and the
-`biaogu.1` workflow integration, while making the official standalone global
-npm Codex installation the stable primary Windows provider.
+- Controlled `COMMIT` for repositories with a normal existing `HEAD` keeps the v1.4.1 semantics and safety boundaries unchanged.
 
-### Standalone Codex CLI primary provider
+## v1.4.1
 
-- When Windows `PATH` exposes a valid global npm `codex.cmd` together with its
-  official `node_modules/@openai/codex/bin/codex.js`, Bridge selects that
-  package-managed Codex before any directly spawnable `codex.exe`, including a
-  VS Code extension-bundled copy.
-- Bridge still launches the npm Codex JavaScript entrypoint directly through
-  `process.execPath`; it never runs the `.cmd` through `cmd.exe` and never turns
-  on `shell: true`.
-- If the global npm package is missing or incomplete, direct executable
-  resolution remains the fallback. A broken earlier shim cannot hide a later
-  valid global npm installation.
-- Local `node_modules/.bin` shims remain supported but do not gain global
-  provider priority. DSH keeps its existing native-executable-first behavior.
-- GOAL orchestration keeps a third continuity tier above Bridge provider
-  selection: if standalone global npm Codex and the bundled `codex.exe`
-  fallback cannot provide a usable Codex executor (or Codex is otherwise
-  unavailable), the runtime emits the required interruption Telegram, switches
-  durably to `web-gpt-ds`, and continues the same frozen GOAL with DS.
+v1.4.1 is an emergency correctness release for Windows-authored workspace configuration, active Codex turn liveness, and controlled-commit recovery safety.
 
-### Verification
+### Fixed
 
-- Windows resolver/executor tests freeze global-npm-primary, bundled-exe
-  fallback, incomplete-package fallback, and broken-shim scanning behavior.
-- A real local smoke with the VS Code bundled directory intentionally placed
-  before the global npm directory still selected
-  `@openai/codex/bin/codex.js`, started `app-server --stdio`, returned a native
-  Codex thread, and completed successfully.
+- Accept a workspace configuration whose first character is one UTF-8 BOM (`U+FEFF`) while preserving strict JSON parsing; a second BOM and all other malformed JSON remain rejected.
+- Reset the Codex inactivity watchdog on any app-server notification only when both `threadId` and `turnId` exactly match the active turn. Other threads, other turns, global notifications, and RPC responses cannot keep the turn alive.
+- Preserve stable unrelated untracked recovery anchors during controlled `COMMIT`, stage and commit only exact proposal targets, reject pre-existing staged or unrelated tracked dirt, and leave history advanced rather than rewriting it if post-commit recovery-anchor verification fails.
 
-## v1.2.1-biaogu.1 (custom fork)
+### Windows operation notes
 
-This custom build is based on upstream Engineering Bridge v1.2.1. The `biaogu.1` suffix identifies local workflow integration and avoids claiming or colliding with a future upstream v1.3.0 release.
+- A foreground `tunnel-client run` belongs to its PowerShell process; closing that PowerShell window terminates the foreground tunnel.
+- Installing Codex Desktop does not guarantee that the `codex` CLI exists on the `PATH` inherited by the process that starts Bridge.
+- Workspace registration controls which roots MCP callers may select. It is separate from filesystem read isolation: Bridge's read-only executor settings restrict writes but do not create an OS-level read sandbox.
 
-### Bounded Knowledge Preflight Receipt
+## v1.4.0
 
-- `run_task`, `generate_controlled_patch`, and `refine_controlled_patch` now accept an optional structured `preflight_receipt` carrying the orchestrator's bounded current context: Knowledge Base path/HEAD, project profile, GOAL summary, acceptance criteria, relevant topics, and critical boundaries.
-- Bridge appends the actual registered `workspace_id`, registered workspace root, selected executor, and `sandbox: read-only` to the executor-facing receipt. Callers do not provide or override that execution boundary.
-- The receipt is context only. It never grants write, release, credential, network, or scope-expansion authority; existing controlled-`APPLY` and executor sandbox rules remain unchanged.
-- Interactive `continue` keeps the current task receipt while replacing only the turn instruction. A new generate/refine delegation receives only the receipt explicitly supplied for that call, so old proposal context is not silently inherited.
-- Omitting `preflight_receipt` preserves the legacy executor instruction byte-for-byte.
+v1.4.0 closes the supervised controlled-write loop while keeping publication outside Bridge.
 
-### Windows release-gate test portability
+### Added
 
-- Temporary Git fixtures now pin LF behavior instead of inheriting a developer's global `core.autocrlf`, directory-alias tests use Windows junctions where ordinary symlink privileges are unavailable, and synthetic workspace/catalog roots use platform-native absolute paths.
-- POSIX command-resolution tests now inject an explicit POSIX platform rather than assuming the host OS. This restores the local Windows full-suite release gate without weakening production workspace, patch, or executor checks.
+- Add optional controlled-patch validation through `configure_validation_profile` and `validate_controlled_patch`. Validation runs only when explicitly requested, uses a fixed per-workspace profile in a temporary detached worktree, and reports `PASS`, `FAIL`, or `INCOMPLETE`; it does not authorize or imply `APPLY`.
+- Add `commit_controlled_patch` as a separate exact `COMMIT` gate for an already-`APPLY`ed controlled patch. It creates one Git commit containing only that applied patch and never pushes.
 
-Controlled-patch proposals can now be generated and refined by either executor, while application remains a deterministic, model-free step.
+### Release boundary
 
-- `generate_controlled_patch` and `refine_controlled_patch` accept an optional `executor: "codex" | "dsh"`, selected per call and defaulting to `codex` when omitted; refinement never inherits the source proposal's executor.
-- DSH-generated proposals use the same retained read-only proposal lifecycle and exact `APPLY` flow as Codex proposals, including restart retention. `apply_controlled_patch` itself takes no executor and invokes no model.
-- Retained proposals persist their executor; legacy records without the field restore as `codex`, records with an invalid executor value are quarantined fail-closed, and restored tasks report the real executor.
+- The local STDIO MCP surface is now 13 tools.
+- `APPLY` remains the explicit filesystem-mutation gate; `COMMIT` is a separate Git-history gate. Neither gate implies push or Release creation.
+- Fresh-chat catalog verification confirmed all 13 tools, and a disposable controlled-COMMIT E2E confirmed that `APPLY` leaves HEAD unchanged and `COMMIT` alone advances HEAD while leaving the worktree clean.
+
+## v1.3.0
+
+v1.3.0 has been published as a Git tag and GitHub Release. This does not indicate npm publication.
+
+### Added
+
+- Add `submit_controlled_patch` for registering a caller-provided complete unified Git diff against the exact current `base_head`. Submission runs the shared read-only preflight, records `source: "submitted"` without an executor identity, survives restart, and still requires human review, write authorization, and exact `APPLY`.
+- Let `generate_controlled_patch` and `refine_controlled_patch` select Codex or DSH per call (default Codex), while keeping application deterministic and model-free. Refinement does not inherit the source proposal's executor.
+- Add optional Codex-only `model` and `reasoning_effort` inputs to `run_task`, `generate_controlled_patch`, and `refine_controlled_patch`; requested values are checked against Codex `model/list`. DSH rejects these options.
+- Allow running generated or refined proposal tasks to be interrupted through `control_task`; interrupted tasks finish with `TASK_INTERRUPTED`.
+
+### Fixed
+
+- Bound executor termination across normal completion, interruption, direct-child exit, inherited open pipes, hard deadlines, and live Windows process trees so tasks settle without leaving the one-shot executor process tree running.
+- Preserve the beginning and true end of oversized DSH stdout, including interrupted output, within the existing 1 MiB bound.
+- Harden controlled-patch application recovery, serialize concurrent applications per workspace, and persist final applied metadata before releasing the retained task.
+- Bound controlled-patch and onboarding Git subprocesses, preserve supported public error classifications, and finalize tasks when terminal-result handlers fail.
+
+### Reliability / Performance
+
+- Bound short Codex JSON-RPC calls to 30 seconds independently of the 15-minute executor deadline; active Codex turns also fail after two minutes without matching protocol activity.
+- Restore retained controlled-patch tasks in one validated batch, eliminating repeated global terminal-retention scans while preserving task order and provenance.
 
 The v1.2.1 Windows validation boundary is unchanged; full multi-client / all-Windows certification is not claimed.
 

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
@@ -19,22 +20,26 @@ export interface ExecutorRequest {
   readonly instruction: string;
   readonly sandbox?: SandboxMode;
   readonly model?: string;
-  /** Optional native Codex reasoning effort. Omitted preserves Codex defaults. */
+  /** Backward-compatible GOAL alias used by the current biaogu integration. */
   readonly reasoning?: ReasoningEffort;
-  /**
-   * Optional GOAL-owned Codex account/profile alias. Omitted keeps the exact
-   * native Codex path. This is transport selection only and grants no extra
-   * repository/workspace authority.
-   */
+  /** Upstream v1.4.x reasoning field. Callers must not set both aliases. */
+  readonly reasoning_effort?: string;
+  /** Optional GOAL-owned Codex account/profile alias. */
   readonly account?: string;
+  /** Enables the first-party Codex live web-search tool only. */
   readonly webSearch?: "live";
   readonly threadId?: string | undefined;
   readonly onEvidence?: (evidence: readonly ExecutorEvidence[]) => void;
 }
 
+export interface ExecutorDiagnostics {
+  readonly executor_started_at: string;
+  readonly executor_ended_at: string;
+}
+
 export type ExecutorResult =
-  | { readonly kind: "completed" | "interrupted"; readonly output: string; readonly threadId?: string | undefined; readonly evidence?: readonly ExecutorEvidence[] }
-  | { readonly kind: "failed"; readonly error: SerializedError; readonly threadId?: string | undefined; readonly evidence?: readonly ExecutorEvidence[] };
+  | { readonly kind: "completed" | "interrupted"; readonly output: string; readonly threadId?: string | undefined; readonly evidence?: readonly ExecutorEvidence[]; readonly diagnostics?: ExecutorDiagnostics }
+  | { readonly kind: "failed"; readonly error: SerializedError; readonly threadId?: string | undefined; readonly evidence?: readonly ExecutorEvidence[]; readonly diagnostics?: ExecutorDiagnostics };
 
 export interface Executor {
   execute(request: ExecutorRequest): Promise<ExecutorResult>;
@@ -46,12 +51,14 @@ export interface ExecutorTiming {
   readonly executionTimeoutMs: number;
   readonly interruptGraceMs: number;
   readonly killGraceMs: number;
+  readonly protocolInactivityTimeoutMs?: number;
 }
 
 export const DEFAULT_EXECUTOR_TIMING: ExecutorTiming = {
   executionTimeoutMs: 15 * 60_000,
   interruptGraceMs: 5_000,
-  killGraceMs: 2_000
+  killGraceMs: 2_000,
+  protocolInactivityTimeoutMs: 2 * 60_000
 };
 
 export function signalProcessGroup(
@@ -68,14 +75,46 @@ export function signalProcessGroup(
   }
 }
 
+export type WindowsTaskkill = (
+  file: string,
+  args: readonly string[],
+  options: {
+    readonly shell: false;
+    readonly stdio: "ignore";
+    readonly timeout: 1000;
+    readonly windowsHide: true;
+  }
+) => void;
+
+const defaultWindowsTaskkill: WindowsTaskkill = (file, args, options) => {
+  execFileSync(file, args, options);
+};
+
 export function signalExecution(
   child: ChildProcessWithoutNullStreams,
   platform: NodeJS.Platform,
   signal: NodeJS.Signals,
-  directChildAlive = true
+  directChildAlive = true,
+  windowsTaskkill: WindowsTaskkill = defaultWindowsTaskkill
 ): boolean {
   if (signalProcessGroup(child, platform, signal)) return true;
   if (!directChildAlive) return false;
+  if (platform === "win32") {
+    const pid = child.pid;
+    if (pid !== undefined && Number.isSafeInteger(pid) && pid > 0) {
+      try {
+        windowsTaskkill("taskkill", ["/PID", String(pid), "/T", "/F"], {
+          shell: false,
+          stdio: "ignore",
+          timeout: 1000,
+          windowsHide: true
+        });
+        return true;
+      } catch {
+        // Fall through to the existing direct-child signal path.
+      }
+    }
+  }
   try {
     return child.kill(signal);
   } catch {

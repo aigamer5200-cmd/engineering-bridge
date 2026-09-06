@@ -1,6 +1,6 @@
 # Threat model
 
-This threat model covers the Engineering Bridge V1 (1.2.0). Bridge assumes one trusted local operator controls startup configuration and the local MCP client. It is not designed for untrusted remote callers.
+This threat model covers the Engineering Bridge V1 (1.4.2). Bridge assumes one trusted local operator controls startup configuration and the local MCP client. It is not designed for untrusted remote callers.
 
 | Risk | Current control | Remaining responsibility or limit |
 |---|---|---|
@@ -13,11 +13,12 @@ This threat model covers the Engineering Bridge V1 (1.2.0). Bridge assumes one t
 | Evidence or review output is treated as durable proof | `task_result` labels review output and returns bounded protocol evidence with task state; truncation/eviction by existing bounds is marked (`[truncated]`, changes-omitted counts, `evidence-drop`) | All such state is diagnostic material, not a durable audit record or semantic guarantee; markers only signal incompleteness |
 | A patch escapes through its path | Patch parser rejects absolute, non-normalized and `..` paths; modifications require tracked regular files, while additions require exact 100644 text diffs and a target absent from HEAD, index, and worktree | Human must review all valid in-workspace targets and semantics |
 | Repository changes between review and apply | Exact `APPLY`, recorded base HEAD, canonical root, and clean tracked worktree/index are checked before apply | A failed proposal may be retried only after preconditions are restored; unrelated untracked files are not treated as tracked dirtiness |
+| Unrelated state enters a controlled commit | Exact `COMMIT` requires a clean index, rejects unrelated tracked dirt, stages retained patch content exactly, and fingerprints stable unrelated untracked recovery anchors without staging them | Verification is discrete rather than continuous; a post-commit verification failure does not roll back or rewrite the commit |
 | Symlink or mode-change writes outside the workspace | Symlink/mode patches and non-regular Git entries are rejected | Read-only tasks still lack symlink/read containment |
 | Sensitive executor errors leak | stderr and partial failure output are discarded; fixed errors are returned; `partial_output` exists only for genuine interrupts and ordinary failures never re-expose it | Reduced diagnostic detail; no persistent redaction/logging system exists |
-| Automatic publication occurs | Apply uses only `git apply`; no test, add, commit, or push command exists | User remains responsible for every later Git operation |
-| Restart loses durable state | Controlled-patch proposals/applied history and the managed workspace catalog persist in two atomic 0600 state files; invalid retained records are quarantined, and global invariants fail closed | Active task supervision state (tasks, threads, evidence, review) is process-local and intentionally lost on restart |
+| Automatic publication occurs | `APPLY` uses only `git apply`; the separate exact `COMMIT` gate creates one local commit and never pushes or creates a Release | User remains responsible for push, tags, and publication |
+| Restart loses durable state | Controlled-patch proposals/applied history, the managed workspace catalog, and validation profiles persist in three atomic 0600 state files; invalid retained records are quarantined, and global invariants fail closed | Active task supervision state (tasks, threads, evidence, review) is process-local and intentionally lost on restart |
 | Retained state is corrupted or tampered with | State files are parsed strictly; individually invalid records are skipped/quarantined, while replay/applied ambiguity and global invariants fail closed | Files are not a credential store or a complete audit log; protect them like local configuration |
-| Long-running task consumes resources | A running task may be explicitly interrupted through `control_task`, which ends it failed | No automatic timeout or resource quota is implemented |
+| Long-running task consumes resources | Executor runs have a 15-minute hard deadline with bounded process-tree termination; active Codex turns also have a two-minute protocol-inactivity watchdog, short Codex RPC calls have a 30-second bound, and a running task may be explicitly interrupted through `control_task` | No general CPU/memory resource quota is implemented |
 
 Prompt wording improves proposal quality but is not treated as an enforceable control. Code validation and human review are separate and both necessary. `control_task` acceptance of read-only output is separate from the exact `APPLY` boundary that authorizes a validated controlled patch.

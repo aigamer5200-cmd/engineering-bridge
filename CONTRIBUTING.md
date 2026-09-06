@@ -4,6 +4,12 @@ Engineering Bridge is a stable local supervised bridge (V1; current release v1.2
 
 Keep changes focused and include tests when behavior changes. Do not add machine-specific paths, credentials, secrets, or private integration details to source, fixtures, examples, documentation, commits, or issue reports.
 
+## Debugging slow or stalled tasks
+
+Bridge invokes Codex via `codex app-server --stdio`. When debugging a slow or stalled task, inspect more than Bridge controlled-patch state and tunnel logs: also inspect `~/.codex/sessions/YYYY/MM/DD/*.jsonl`, which contains structured timestamps, types, and events, and optionally `~/.codex/logs_2.sqlite` if it actually contains rows. Running `generate_controlled_patch` and `refine_controlled_patch` tasks do not expose executor evidence like ordinary `run_task`, so `running` with no evidence must not be interpreted as a handshake or startup stall.
+
+Correlate the Bridge `task_id` with the Codex thread/session ID when available. Compare session-start, tool-result, final-message, and session-end timestamps before attributing latency to RPC, turn execution, terminal handling, persistence, or outer orchestration. If phase timing is insufficient, report that the evidence is insufficient rather than guessing. Future observability should persist bounded Bridge `task_id` ↔ Codex thread/session mappings and phase timestamps without sensitive body logging or unbounded growth.
+
 Run the standard checks before submitting a change:
 
 ```sh

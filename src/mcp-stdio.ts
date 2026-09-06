@@ -14,11 +14,18 @@ import { CoreError, serializeError } from "./core/errors.js";
 import { RegisteredWorkspaceTaskService } from "./tasks/registered-workspace-task-service.js";
 import { ExecutionReceiptStore } from "./tasks/execution-receipt-store.js";
 import { ControlledPatchService } from "./tasks/controlled-patch-service.js";
+import { ControlledPatchValidationService } from "./tasks/controlled-patch-validation-service.js";
+import {
+  type ValidationProfile,
+  type ValidationStep,
+  ValidationProfileStore
+} from "./tasks/validation-profile-store.js";
+import { ValidationProcessRunner } from "./tasks/validation-process-runner.js";
+import { KnowledgePreflightReceiptSchema } from "./tasks/knowledge-preflight-receipt.js";
+import { createTaskObserver } from "./tasks/task-observer.js";
 import { ManagedWorkspaceCatalog } from "./workspaces/managed-workspace-catalog.js";
 import { RegisteredWorkspaceRegistry } from "./workspaces/registered-workspace-registry.js";
 import { WorkspaceOnboardingService } from "./workspaces/workspace-onboarding-service.js";
-import { KnowledgePreflightReceiptSchema } from "./tasks/knowledge-preflight-receipt.js";
-import { createTaskObserver } from "./tasks/task-observer.js";
 
 const WorkspaceEntrySchema = z.object({
   id: z.string().min(1),
@@ -33,11 +40,47 @@ const ProjectRootEntrySchema = z.object({
 
 const WorkspaceConfigSchema = z.array(z.union([WorkspaceEntrySchema, ProjectRootEntrySchema]));
 
+const ValidationStepSchema = z.object({
+  name: z.string().min(1),
+  argv: z.array(z.string()).min(1),
+  timeout_seconds: z.number().int().positive().optional()
+}).strict();
+
+const ValidationProfileSchema = z.object({
+  preparation: z.array(ValidationStepSchema),
+  validation: z.array(ValidationStepSchema),
+  default_step_timeout_seconds: z.number().int().positive().optional().default(600),
+  total_timeout_seconds: z.number().int().positive().optional().default(1200)
+}).strict();
+
 type WorkspaceEntry = z.infer<typeof WorkspaceEntrySchema>;
 type ProjectRootEntry = z.infer<typeof ProjectRootEntrySchema>;
 
 function isProjectRootEntry(entry: WorkspaceEntry | ProjectRootEntry): entry is ProjectRootEntry {
   return "kind" in entry;
+}
+
+function toValidationStep(
+  step: z.infer<typeof ValidationStepSchema>
+): ValidationStep {
+  return {
+    name: step.name,
+    argv: [step.argv[0]!, ...step.argv.slice(1)],
+    ...(step.timeout_seconds === undefined
+      ? {}
+      : { timeoutSeconds: step.timeout_seconds })
+  };
+}
+
+function toValidationProfile(
+  profile: z.infer<typeof ValidationProfileSchema>
+): ValidationProfile {
+  return {
+    preparation: profile.preparation.map(toValidationStep),
+    validation: profile.validation.map(toValidationStep),
+    defaultStepTimeoutSeconds: profile.default_step_timeout_seconds,
+    totalTimeoutSeconds: profile.total_timeout_seconds
+  };
 }
 
 function jsonContent(value: unknown) {
@@ -60,7 +103,8 @@ async function main(): Promise<void> {
 
   const configPath = process.argv[2];
   if (configPath === undefined) throw new Error("Workspace configuration path is required.");
-  const parsed = WorkspaceConfigSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+  const configSource = await readFile(configPath, "utf8");
+  const parsed = WorkspaceConfigSchema.parse(JSON.parse(configSource.startsWith("\uFEFF") ? configSource.slice(1) : configSource));
   const observer = createTaskObserver(configPath);
   const workspaceEntries = parsed.filter((entry): entry is WorkspaceEntry => !isProjectRootEntry(entry));
   const projectRootEntries = parsed.filter(isProjectRootEntry);
@@ -106,28 +150,49 @@ async function main(): Promise<void> {
     `${configPath}.controlled-patches.json`
   );
   await controlledPatches.load();
+  const validationProfiles = new ValidationProfileStore(
+    `${configPath}.validation-profiles.json`
+  );
+  const validationRunner = new ValidationProcessRunner();
+  const validation = new ControlledPatchValidationService(
+    registry,
+    controlledPatches,
+    validationProfiles,
+    validationRunner
+  );
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. For Codex only, model may pin an explicit Codex model, reasoning may pin the native reasoning effort, account may select an optional GOAL-managed codex-switch profile alias, and web_research=true enables native live web_search while shell/OS network access remains disabled. Omitting model/reasoning/account preserves native Codex defaults and routing. An optional bounded Knowledge Preflight Receipt is prepended without granting extra authority. This tool does not modify workspace files.",
+    description: "Run a read-only task with the selected executor in a pre-registered workspace. Codex may use an explicit model, reasoning effort, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt. This tool does not modify workspace files.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
       executor: z.enum(["codex", "dsh"]).optional().default("codex"),
       model: z.string().trim().min(1).max(200).optional(),
       reasoning: z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+      reasoning_effort: z.string().trim().min(1).max(100).optional(),
       account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
       web_research: z.boolean().optional().default(false),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, reasoning, account, web_research, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, account, web_research, preflight_receipt }) => {
     try {
+      if (reasoning !== undefined && reasoning_effort !== undefined) {
+        throw new CoreError("UNSUPPORTED_ACTION");
+      }
+      if (executor === "dsh" && (
+        model !== undefined || reasoning !== undefined || reasoning_effort !== undefined ||
+        account !== undefined || web_research
+      )) {
+        throw new CoreError("UNSUPPORTED_ACTION");
+      }
       const { taskId } = service.startTask({
         workspace_id,
         instruction,
         executor,
         ...(model === undefined ? {} : { model }),
         ...(reasoning === undefined ? {} : { reasoning }),
+        ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
         ...(account === undefined ? {} : { account }),
         ...(web_research ? { web_research: true } : {}),
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
@@ -149,11 +214,12 @@ async function main(): Promise<void> {
       (view.state === "waiting_for_supervisor_review" && storedReceipt.state === "waiting_for_supervisor_review") ||
       (view.state === "completed" && storedReceipt.state === "completed")
     ) ? storedReceipt : undefined;
-    return jsonContent({ task_id: view.taskId, state: view.state,
+    const taskView = { task_id: view.taskId, state: view.state,
       ...(view.source === undefined ? {} : { source: view.source }),
       ...(view.executor === undefined ? {} : { executor: view.executor }),
       ...(view.model === undefined ? {} : { model: view.model }),
       ...(view.reasoning === undefined ? {} : { reasoning: view.reasoning }),
+      ...(view.reasoning_effort === undefined ? {} : { reasoning_effort: view.reasoning_effort }),
       ...(view.account === undefined ? {} : { account: view.account }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
@@ -161,6 +227,7 @@ async function main(): Promise<void> {
       ...(view.review_output === undefined ? {} : { review_output: view.review_output }),
       ...(view.partial_output === undefined ? {} : { partial_output: view.partial_output }),
       evidence: view.evidence,
+      ...(view.diagnostics === undefined ? {} : { diagnostics: view.diagnostics }),
       ...(receipt === undefined ? {} : {
         execution_receipt: {
           workspace_id: receipt.workspaceId,
@@ -176,7 +243,13 @@ async function main(): Promise<void> {
           recorded_at: receipt.recordedAt
         }
       }),
-      ...(view.error === undefined ? {} : { error: view.error }) });
+      ...(view.error === undefined ? {} : { error: view.error }) };
+    return jsonContent({
+      ...taskView,
+      mcp_diagnostics: {
+        serialized_task_view_bytes: Buffer.byteLength(JSON.stringify(taskView), "utf8")
+      }
+    });
   });
 
   server.registerTool("control_task", {
@@ -240,21 +313,24 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("generate_controlled_patch", {
-    description: "Generate a read-only patch proposal for review in any registered Git workspace. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction. Generation requires no write authorization, and controlled-write authorization is required only to APPLY.",
+    description: "Generate a read-only patch proposal for review in any registered Git workspace. Optional model/reasoning selection and a bounded Knowledge Preflight Receipt remain read-only; controlled-write authorization is required only to APPLY.",
     inputSchema: {
       workspace_id: z.string().min(1),
       change_request: z.string().min(1),
       executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      model: z.string().min(1).optional(),
+      reasoning_effort: z.string().min(1).optional(),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, async ({ workspace_id, change_request, executor, preflight_receipt }) => {
+  }, async ({ workspace_id, change_request, executor, model, reasoning_effort, preflight_receipt }) => {
     try {
-      const proposal = await controlledPatches.generate({
-        workspace_id,
-        change_request,
-        executor,
-        ...(preflight_receipt === undefined ? {} : { preflight_receipt })
-      });
+      if (executor === "dsh" && (model !== undefined || reasoning_effort !== undefined)) {
+        throw new CoreError("UNSUPPORTED_ACTION");
+      }
+      const proposal = await controlledPatches.generate({ workspace_id, change_request, executor,
+        ...(model === undefined ? {} : { model }),
+        ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+        ...(preflight_receipt === undefined ? {} : { preflight_receipt }) });
       return jsonContent({ task_id: proposal.taskId, base_head: proposal.baseHead });
     } catch (error) {
       return { isError: true, ...jsonContent({ error: serializeError(error) }) };
@@ -262,21 +338,24 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("refine_controlled_patch", {
-    description: "Refine a completed retained patch proposal into a new complete read-only proposal against the same base HEAD. An optional bounded Knowledge Preflight Receipt is prepended to the executor instruction for this new delegation.",
+    description: "Refine a completed retained patch proposal into a new complete read-only proposal against the same base HEAD. Optional model/reasoning selection and a bounded Knowledge Preflight Receipt remain read-only.",
     inputSchema: {
       patch_task_id: z.string().min(1),
       change_request: z.string().min(1),
       executor: z.enum(["codex", "dsh"]).optional().default("codex"),
+      model: z.string().min(1).optional(),
+      reasoning_effort: z.string().min(1).optional(),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, async ({ patch_task_id, change_request, executor, preflight_receipt }) => {
+  }, async ({ patch_task_id, change_request, executor, model, reasoning_effort, preflight_receipt }) => {
     try {
-      const proposal = await controlledPatches.refine({
-        patch_task_id,
-        change_request,
-        executor,
-        ...(preflight_receipt === undefined ? {} : { preflight_receipt })
-      });
+      if (executor === "dsh" && (model !== undefined || reasoning_effort !== undefined)) {
+        throw new CoreError("UNSUPPORTED_ACTION");
+      }
+      const proposal = await controlledPatches.refine({ patch_task_id, change_request, executor,
+        ...(model === undefined ? {} : { model }),
+        ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+        ...(preflight_receipt === undefined ? {} : { preflight_receipt }) });
       return jsonContent({ task_id: proposal.taskId, base_head: proposal.baseHead });
     } catch (error) {
       return { isError: true, ...jsonContent({ error: serializeError(error) }) };
@@ -308,6 +387,52 @@ async function main(): Promise<void> {
   }, async ({ patch_task_id, confirmation }) => jsonContent(
     await controlledPatches.apply({ patch_task_id, confirmation })
   ));
+
+  server.registerTool("commit_controlled_patch", {
+    description: "Create one Git commit containing only an already-APPLYed controlled patch after exact COMMIT confirmation. Never pushes.",
+    inputSchema: {
+      patch_task_id: z.string().min(1),
+      message: z.string().min(1),
+      confirmation: z.literal("COMMIT")
+    }
+  }, async ({ patch_task_id, message, confirmation }) => jsonContent(
+    await controlledPatches.commit({
+      patch_task_id,
+      message,
+      confirmation
+    })
+  ));
+
+  server.registerTool("configure_validation_profile", {
+    description: "Configure the fixed validation profile for a registered workspace after exact CONFIGURE confirmation.",
+    inputSchema: z.object({
+      workspace_id: z.string().min(1),
+      profile: ValidationProfileSchema,
+      confirmation: z.literal("CONFIGURE")
+    }).strict()
+  }, async ({ workspace_id, profile }) => {
+    try {
+      return jsonContent(await validation.configure(
+        workspace_id,
+        toValidationProfile(profile)
+      ));
+    } catch (error) {
+      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+    }
+  });
+
+  server.registerTool("validate_controlled_patch", {
+    description: "Validate one retained controlled patch with its workspace's configured profile.",
+    inputSchema: z.object({
+      patch_task_id: z.string().min(1)
+    }).strict()
+  }, async ({ patch_task_id }) => {
+    try {
+      return jsonContent(await validation.validate(patch_task_id));
+    } catch (error) {
+      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+    }
+  });
 
   await server.connect(new StdioServerTransport());
 }

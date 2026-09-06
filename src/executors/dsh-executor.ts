@@ -205,7 +205,7 @@ export class DshExecutor implements Executor {
       let active!: ActiveExecution;
       const currentTerminationResult = (): ExecutorResult =>
         terminationResult?.kind === "interrupted"
-          ? { kind: "interrupted", output: new TextDecoder("utf-8").decode(Buffer.concat(chunks)) }
+          ? { kind: "interrupted", output: this.retainedOutput(chunks, bytes, truncated, tail) ?? "" }
           : terminationResult ?? failure("DSH_EXECUTION_FAILED");
       const finish = (result: ExecutorResult): void => {
         if (settled) return;
@@ -239,7 +239,7 @@ export class DshExecutor implements Executor {
         beginInterrupt: () => {
           if (active.interrupted) return;
           active.interrupted = true;
-          beginTermination({ kind: "interrupted", output: new TextDecoder("utf-8").decode(Buffer.concat(chunks)) });
+          beginTermination({ kind: "interrupted", output: this.retainedOutput(chunks, bytes, truncated, tail) ?? "" });
         }
       };
       this.active = active;
@@ -316,22 +316,33 @@ export class DshExecutor implements Executor {
     active.beginInterrupt();
   }
 
-  private completedResult(chunks: readonly Buffer[], bytes: number, truncated: boolean, tail: Buffer): ExecutorResult {
-    if (bytes === 0) return { kind: "completed", output: "" };
+  private retainedOutput(
+    chunks: readonly Buffer[],
+    bytes: number,
+    truncated: boolean,
+    tail: Buffer
+  ): string | undefined {
+    if (bytes === 0) return "";
     if (truncated) {
       const prefix = decodeTruncatedPrefix([Buffer.concat(chunks).subarray(0, HEAD_OUTPUT_BYTES)]);
       const suffix = decodeTruncatedTail(tail);
       return prefix === undefined || suffix === undefined
-        ? failure("DSH_PROTOCOL_ERROR")
-        : { kind: "completed", output: `${prefix}${TRUNCATION_SEPARATOR}${suffix}` };
+        ? undefined
+        : `${prefix}${TRUNCATION_SEPARATOR}${suffix}`;
     }
     try {
-      const output = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
-      return output.endsWith("\n")
-        ? { kind: "completed", output: output.slice(0, -1) }
-        : { kind: "completed", output };
+      return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
     } catch {
-      return failure("DSH_PROTOCOL_ERROR");
+      return undefined;
     }
+  }
+
+  private completedResult(chunks: readonly Buffer[], bytes: number, truncated: boolean, tail: Buffer): ExecutorResult {
+    const output = this.retainedOutput(chunks, bytes, truncated, tail);
+    if (output === undefined) return failure("DSH_PROTOCOL_ERROR");
+    if (truncated) return { kind: "completed", output };
+    return output.endsWith("\n")
+      ? { kind: "completed", output: output.slice(0, -1) }
+      : { kind: "completed", output };
   }
 }
