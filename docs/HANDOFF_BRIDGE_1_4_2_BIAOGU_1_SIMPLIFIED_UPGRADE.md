@@ -10,6 +10,7 @@ base HEAD: fd6c208931f833301698eaeaa4593d92e401b706
 upstream tag: v1.4.2
 upstream commit: de09c35de9f7611bc0ee8c592bef4feb38e22e32
 target version: 1.4.2-biaogu.1
+runtime source commit: 53b87af1ad800bfbb9c4b533a46d6ce3c295df95
 ```
 
 GOAL runtime:
@@ -20,9 +21,9 @@ executor_mode: web-gpt-ds
 repository_write_authority: ds_apply_patch
 ```
 
-## Production before promotion
+## Production promotion result
 
-At the start of this upgrade phase, the authoritative Bridge manager reported:
+At the start of this upgrade phase, Production was:
 
 ```text
 production version: 1.2.1-biaogu.6
@@ -31,7 +32,28 @@ canary port: 8769
 previous version: 1.2.1-biaogu.5
 ```
 
-No production Bridge switch has occurred at this checkpoint.
+The simplified guarded promotion completed successfully on 2026-09-06:
+
+```text
+current production version: 1.4.2-biaogu.1
+current production root: D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.1
+production port: 8768
+production PID at promotion/verification: 49696
+recorded previous version: 1.2.1-biaogu.6
+recorded previous root: D:\Engineering_Bridge_System\BridgeVersions\1.2.1-biaogu.6
+canary port after acceptance: closed / no listener
+```
+
+The manager's guarded switch verified both local and public surfaces:
+
+```text
+local /mcp unauthenticated: 401
+local OAuth metadata: 200
+public /mcp unauthenticated: 401
+public OAuth metadata: 200
+```
+
+No rollback was required.
 
 ## Owner-approved simplified upgrade policy
 
@@ -109,33 +131,146 @@ scope or authority.
 
 ## Validation evidence
 
-Current pre-candidate checkpoint:
+Final candidate source validation:
 
 ```text
 npm ci: PASS
 npm run typecheck: PASS
 
 full upstream + fork suite:
-377 total
-372 PASS
+382 total
+377 PASS
 0 FAIL
 5 SKIP
 
-Biaogu critical regression:
-112 PASS
-0 FAIL
-0 SKIP
+candidate commit: 53b87af1ad800bfbb9c4b533a46d6ce3c295df95
+candidate branch pushed: PASS
+candidate branch ahead/behind origin: 0 / 0
 ```
 
 The five full-suite skips are Windows platform limitations for tests that
 require unsupported POSIX/symlink primitives in the current Windows execution
 environment. They are explicitly reported rather than treated as passes.
 
-## Do-not-touch boundaries
+The painless-upgrade manager then prepared the exact immutable runtime from
+`53b87af1ad800bfbb9c4b533a46d6ce3c295df95`:
 
-Until candidate/canary acceptance is complete:
+```text
+runtime: D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.1
+manifest version: 1.4.2-biaogu.1
+manifest commit: 53b87af1ad800bfbb9c4b533a46d6ce3c295df95
+package-lock SHA256: 0419772A30F17461668F0891F30DFEEE7C3D799B721630983BBFB9FB1D620445
+npm ci: PASS
+typecheck: PASS
+npm test: PASS
+build: PASS via npm test
+```
 
-- do not replace or overwrite the production `1.2.1-biaogu.6` runtime;
+### Canary acceptance
+
+The first Canary attempt correctly fail-closed because the old smoke harness
+still expected the pre-1.4 exact 10-tool surface. The harness was made
+version-aware: pre-1.4 remains exact 10 tools and 1.4+ requires exact 13 tools.
+
+The next live task failed with `CODEX_EXECUTION_FAILED`. A same-time Canary of
+the still-current `1.2.1-biaogu.6` failed identically. A direct read-only Codex
+diagnostic then proved the native account had reached its usage limit, so this
+was not a Bridge 1.4.2 regression.
+
+The already-authorized multi-account module showed alias B with available
+quota. After completing the missing optional Bridge multi-account environment
+wiring, the 1.4.2 Canary passed with explicit alias B:
+
+```text
+Canary version: 1.4.2-biaogu.1
+Canary port: 8769
+MCP tools: exact 13 / PASS
+Codex task: PASS
+real thread_id: PASS
+account routing: B / PASS
+marker: BRIDGE_CANARY_OK
+sandbox unchanged: PASS
+Canary report status: PASS
+```
+
+No credential, token, cookie, auth-file content, or account identifier is
+stored in the handoff or Canary report; only the non-secret alias is retained.
+
+### Post-promotion production smoke
+
+After the guarded switch, the existing local OAuth access store was used only
+in-memory to authenticate a local 8768 MCP client; the token was never printed.
+
+```text
+server version: 1.4.2-biaogu.1
+authenticated MCP connection: PASS
+MCP tools: exact 13 / PASS
+explicit B account task: PASS
+real Codex thread: PASS
+marker: BRIDGE_PRODUCTION_OK
+sandbox unchanged: PASS
+```
+
+### Rollback capability after promotion
+
+No pre-upgrade full rollback drill was performed, per the Owner-approved
+simplified policy. After promotion, a non-switching rollback-capability check
+confirmed:
+
+```text
+rollback target runtime 1.2.1-biaogu.6: valid
+rollback target Canary authority: PASS
+rollback target commit: 8a3e3be63911a34c664a13822d387afe0f79b87d
+manager previous pointer: 1.2.1-biaogu.6
+```
+
+Therefore downgrade capability remains live without having disrupted the
+healthy 1.4.2 Production runtime.
+
+## Operational control-plane reconciliation
+
+The versioned Bridge source is not the only upgrade authority. The external
+control plane under `D:\Engineering_Bridge_System` was also reconciled:
+
+- `control\apply_bridge_local_overlays.py`
+  - retains the legacy 1.2.x overlay path;
+  - supports the upstream 1.4.2 executor shape;
+  - keeps upstream default model behavior unchanged when no Bridge profile env
+    is loaded;
+  - applies the sanctioned Bridge profile only when its environment authority
+    is present.
+- `control\manage_bridge_painless_upgrade.py`
+  - materializes only the five non-secret multi-account routing fields from the
+    canonical Shoestring multi-account manager;
+  - loads them optionally in Canary and Production wrappers;
+  - supports an explicit Canary account alias;
+  - keeps missing/disabled multi-account state on the native Codex path;
+  - emits UTF-8-safe CLI output.
+- `runtime\bridge-canary-http-smoke.cjs`
+  - exact 10-tool acceptance for pre-1.4 runtimes;
+  - exact 13-tool acceptance for 1.4+;
+  - optional explicit account routing for acceptance only.
+- `runtime\bridge-production-http-smoke.cjs`
+  - authenticates to local Production with an already-existing OAuth token
+    entirely in memory;
+  - never prints the credential;
+  - verifies exact 13 tools, a real B-account turn, and sandbox invariance.
+- `control\BRIDGE_PAINLESS_UPGRADE_POLICY.md`
+  - records the Owner-approved simplified upgrade policy;
+  - explicitly preserves rollback capability while removing a mandatory
+    pre-upgrade rollback rehearsal;
+  - records current Production `1.4.2-biaogu.1` and previous
+    `1.2.1-biaogu.6`.
+
+The runtime now also has
+`runtime\bridge-codex-multi-account.env`. It contains only the five sanctioned
+non-secret routing keys (switch executable path, switch state path, isolated
+Codex home, alias allowlist, and Codex binary directory). It contains no token
+or auth payload.
+
+## Do-not-touch boundaries after promotion
+
+- do not delete or overwrite the previous `1.2.1-biaogu.6` rollback runtime;
 - do not delete previous Bridge versions;
 - do not mutate `C:\Users\User\.codex`;
 - do not expose credentials, account tokens, cookies, or auth files;
@@ -143,20 +278,18 @@ Until candidate/canary acceptance is complete:
   authorization;
 - do not broaden Worktree authority outside `D:\WORKTREE_ZONE`.
 
-## Next exact task
+## Remaining Owner gate
 
 ```text
-1. Finalize the v1.4.2 reconciliation merge and checkpoint the candidate branch.
-2. Inspect the existing painless-upgrade manager's prepare/canary/switch
-   contracts against the upstream 1.4.2 13-tool MCP surface.
-3. Confirm 1.2.1-biaogu.6 rollback capability remains intact.
-4. Prepare immutable 1.4.2-biaogu.1 candidate runtime.
-5. Start/verify canary on 8769.
-6. Run MCP + GOAL compatibility smoke, including Biaogu routing/receipt paths.
-7. If all canary gates pass, guarded-switch production 8768.
-8. Run post-promotion production smoke.
-9. On actual failure only, downgrade to retained 1.2.1-biaogu.6.
-10. Update this HANDOFF, selective C/P, then wait for Owner I/W.
+Upgrade execution: COMPLETE
+Production acceptance: PASS
+Rollback capability: PRESERVED
+Candidate source branch: checkpointed/pushed
+
+Next action requires Owner authorization:
+I/W candidate/bridge-v1.4.2-biaogu-20260906 into the fork main, or leave the
+source candidate branch isolated while Production continues to run the
+immutable 1.4.2-biaogu.1 runtime.
 ```
 
 The next window/account can continue from this repository state plus this
