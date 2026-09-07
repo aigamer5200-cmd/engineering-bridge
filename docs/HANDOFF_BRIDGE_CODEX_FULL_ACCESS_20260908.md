@@ -72,3 +72,69 @@ Use the existing simplified guarded Bridge upgrade path:
 Do not I/W this feature branch into the fork mainline without separate Owner
 authorization. Another fresh session can continue from this HANDOFF + branch
 HEAD without depending on any previous Codex native thread.
+
+## Production promotion result
+
+Promotion was completed through the existing simplified guarded upgrade
+manager after the source checkpoint above was pushed.
+
+```text
+prepared_runtime = D:/Engineering_Bridge_System/BridgeVersions/1.4.2-biaogu.2
+runtime_source_commit = 6a741c7ca914354bdaab9ac508a8cada6515ae51
+prepare_validation = npm_ci PASS / typecheck PASS / npm_test PASS
+canary_port = 8769
+canary_status = PASS
+production_port = 8768
+production_version = 1.4.2-biaogu.2
+production_pid = 29180
+production_verify = PASS
+rollback_version = 1.4.2-biaogu.1
+```
+
+The final full-access smoke used a dedicated disposable managed Git workspace:
+
+```text
+D:/WORKTREE_ZONE/bridge-full-access-smoke-20260908
+```
+
+The MCP `run_task` call intentionally omitted a sandbox override, so it tested
+the new default rather than an explicitly requested exception. Production
+returned:
+
+```text
+executor = codex
+model = gpt-6-astra
+reasoning = low
+account = B
+sandbox = danger-full-access
+execution_receipt.read_only = false
+review_output = BRIDGE_FULL_ACCESS_OK
+```
+
+Codex created only `BRIDGE_FULL_ACCESS_SMOKE.txt`; its file-change evidence
+showed exact content `BRIDGE_FULL_ACCESS_OK\n`, and DS independently read the
+same bytes back from the disposable workspace. No Git add/commit occurred in
+that smoke repo.
+
+Post-switch `manage_bridge_painless_upgrade.py verify` returned PASS for local
+MCP/OAuth metadata, public MCP/OAuth metadata, provider discovery, and current
+runtime identity. The prior `1.4.2-biaogu.1` runtime remains the exact rollback
+target.
+
+The disposable smoke workspace is retained as local evidence and is not
+deleted automatically; cleanup requires a separately bounded cleanup action.
+
+## Current operational truth
+
+```text
+Bridge Production = 1.4.2-biaogu.2
+Codex ordinary run_task default = danger-full-access
+DSH = read-only
+controlled-patch generation/refinement = read-only
+controlled-patch APPLY authorization = unchanged
+Codex auth/token payload mutation = 0
+```
+
+The target repository branch has not been I/W-integrated into fork main. The
+production runtime is built from the exact pushed feature checkpoint and is
+fully rollback-capable.

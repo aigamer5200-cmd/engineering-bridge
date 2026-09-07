@@ -31,6 +31,11 @@ controlled-patch and DSH safety lanes.
 - Full unit suite: 385 tests, 380 passed, 0 failed, 5 platform skips.
 - Native app-server mapping is covered for `danger-full-access` ->
   `dangerFullAccess`.
+- Guarded Canary on port 8769: PASS.
+- Production 8768 promotion: PASS; `1.4.2-biaogu.1` retained as rollback.
+- Real production MCP smoke: default Codex task reported
+  `sandbox=danger-full-access`, `read_only=false`, created one disposable
+  marker file, and DS independently read back `BRIDGE_FULL_ACCESS_OK`.
 
 ## v1.4.2-biaogu.1
 
