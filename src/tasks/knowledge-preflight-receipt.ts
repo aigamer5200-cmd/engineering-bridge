@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SandboxMode } from "../executors/executor.js";
 
 const singleLine = z.string()
   .min(1)
@@ -24,6 +25,7 @@ export interface KnowledgePreflightExecutionBoundary {
   readonly workspaceId: string;
   readonly workspaceRoot: string;
   readonly executor: "codex" | "dsh";
+  readonly sandbox: SandboxMode;
 }
 
 function bulletList(values: readonly string[]): string[] {
@@ -55,7 +57,7 @@ export function attachKnowledgePreflightReceipt(
     `- workspace_id: ${boundary.workspaceId}`,
     `- workspace_root: ${boundary.workspaceRoot}`,
     `- executor: ${boundary.executor}`,
-    "- sandbox: read-only",
+    `- sandbox: ${boundary.sandbox}`,
     "End Knowledge Preflight Receipt",
     "",
     "Task instruction:",

@@ -3,7 +3,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 
-export type SandboxMode = "read-only" | "workspace-write";
+export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export interface EvidenceChange { readonly path: string; readonly diff: string }

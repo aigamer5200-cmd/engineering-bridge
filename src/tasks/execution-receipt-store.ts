@@ -3,7 +3,7 @@ import { open, readFile, rename, unlink } from "node:fs/promises";
 import { CoreError } from "../core/errors.js";
 import { isId } from "../core/ids.js";
 import type { Id } from "../core/ids.js";
-import type { ReasoningEffort } from "../executors/executor.js";
+import type { ReasoningEffort, SandboxMode } from "../executors/executor.js";
 
 export type ExecutionReceiptOperation =
   | "run_task"
@@ -21,7 +21,8 @@ export interface ExecutionReceiptRecord {
   readonly reasoning?: ReasoningEffort;
   readonly account?: string;
   readonly operation: ExecutionReceiptOperation;
-  readonly readOnly: true;
+  readonly sandbox: SandboxMode;
+  readonly readOnly: boolean;
   readonly state: ExecutionReceiptState;
   readonly recordedAt: string;
 }
@@ -30,7 +31,7 @@ const EXECUTION_RECEIPTS_VERSION = 1;
 const MAX_EXECUTION_RECEIPTS = 500;
 
 /**
- * Durable, Bridge-authored provenance for formal read-only Codex execution.
+ * Durable, Bridge-authored provenance for formal Codex execution.
  *
  * Active task supervision remains process-local.  This store persists only the
  * bounded evidence needed by Shoestring GOAL to prove that a ready/completed
@@ -92,6 +93,7 @@ export class ExecutionReceiptStore {
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
         ...(input.account === undefined ? {} : { account: input.account }),
         operation: input.operation,
+        sandbox: input.sandbox,
         readOnly: input.readOnly,
         state: input.state,
         recordedAt: new Date().toISOString()
@@ -154,6 +156,7 @@ export class ExecutionReceiptStore {
         ...(record.reasoning === undefined ? {} : { reasoning: record.reasoning }),
         ...(record.account === undefined ? {} : { account: record.account }),
         operation: record.operation,
+        sandbox: record.sandbox,
         read_only: record.readOnly,
         state: record.state,
         recorded_at: record.recordedAt
@@ -186,7 +189,7 @@ function parseRecord(item: unknown): ExecutionReceiptRecord | undefined {
       typeof item.workspace_id !== "string" || item.workspace_id.length === 0 ||
       typeof item.workspace_root !== "string" || item.workspace_root.length === 0 ||
       item.executor !== "codex" ||
-      !isOperation(item.operation) || item.read_only !== true ||
+      !isOperation(item.operation) || typeof item.read_only !== "boolean" ||
       !isState(item.state) ||
       typeof item.recorded_at !== "string" || item.recorded_at.length === 0) {
     return undefined;
@@ -200,7 +203,12 @@ function parseRecord(item: unknown): ExecutionReceiptRecord | undefined {
     ...(isReasoningEffort(item.reasoning) ? { reasoning: item.reasoning } : {}),
     ...(typeof item.account === "string" && item.account.length > 0 ? { account: item.account } : {}),
     operation: item.operation,
-    readOnly: true,
+    sandbox: isSandboxMode(item.sandbox)
+      ? item.sandbox
+      : item.read_only === true
+        ? "read-only"
+        : "danger-full-access",
+    readOnly: item.read_only,
     state: item.state,
     recordedAt: item.recorded_at
   };
@@ -225,7 +233,12 @@ function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boo
     a.reasoning === b.reasoning &&
     a.account === b.account &&
     a.operation === b.operation &&
+    a.sandbox === b.sandbox &&
     a.readOnly === b.readOnly;
+}
+
+function isSandboxMode(value: unknown): value is SandboxMode {
+  return value === "read-only" || value === "workspace-write" || value === "danger-full-access";
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

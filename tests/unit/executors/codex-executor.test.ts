@@ -206,6 +206,26 @@ test("preserves the default Codex JSON-RPC flow when model selection is omitted"
   assert.equal("effort" in turnStart.params, false);
 });
 
+test("maps danger-full-access to the native Codex full-access sandbox", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "done" }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "modify the workspace",
+    sandbox: "danger-full-access"
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.equal(threadStart.params.sandbox, "danger-full-access");
+  assert.equal(threadStart.params.approvalPolicy, "never");
+  assert.deepEqual(turnStart.params.sandboxPolicy, { type: "dangerFullAccess" });
+  assert.equal(turnStart.params.approvalPolicy, "never");
+});
+
 test("validates the requested model and effort before starting the normal Codex flow", async () => {
   const invocations: Invocation[] = [];
   const executor = timedExecutor(fakeStarter({

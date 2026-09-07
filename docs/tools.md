@@ -4,9 +4,9 @@ This is the tool surface of Engineering Bridge V1 (1.4.2). The local STDIO MCP s
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), and optional Codex-only `model` and `reasoning_effort`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `sandbox` (`read-only | workspace-write | danger-full-access`), and optional Codex-only `model` and `reasoning_effort`.
 
-Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. Codex validates requested model/reasoning support through `model/list`; DSH rejects either option. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
+Starts a supervised task with the selected executor and returns `task_id`. Codex defaults to `danger-full-access` under the Owner-approved local policy; callers may explicitly narrow a task to `workspace-write` or `read-only`. DSH is always pinned read-only and rejects sandbox expansion. Codex validates requested model/reasoning support through `model/list`. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor and sandbox are fixed for the task lifetime and reported honestly in `task_result` and the Bridge execution receipt.
 
 ## `task_result`
 
@@ -27,7 +27,7 @@ Inputs: `task_id`, `action`, and optional `instruction`.
 
 The actions are state-specific:
 
-- `continue`: while `waiting_for_supervisor_review`, requires a non-empty instruction, queues another read-only turn, and preserves app-server thread continuity with `thread/resume` for Codex. For DSH, `continue` starts a new headless execution; there is no native resume.
+- `continue`: while `waiting_for_supervisor_review`, requires a non-empty instruction, queues another turn with the task's original sandbox, and preserves app-server thread continuity with `thread/resume` for Codex. For DSH, `continue` starts a new read-only headless execution; there is no native resume.
 - `steer`: while `running`, requires a non-empty instruction and steers the active turn (Codex only).
 - `interrupt`: while `running`, interrupts the active turn. When interruption completes, the task ends as `failed`; genuine partial output may be exposed as `partial_output`.
 - `accept`: while `waiting_for_supervisor_review`, marks the reviewed output `completed` without starting another turn.
@@ -50,7 +50,7 @@ Creates and git-initializes a new single-segment directory inside a configured `
 
 Inputs: `workspace_id`, `confirmation` (must equal `AUTHORIZE` exactly).
 
-Grants persistent controlled-write permission to one managed workspace only; manual workspaces remain authoritative through `workspaces.json`. The authorization is persisted first, then applied at runtime. This permission gates only `apply_controlled_patch`; it is not direct-write access and does not change `run_task` (which stays read-only).
+Grants persistent controlled-patch permission to one managed workspace only; manual workspaces remain authoritative through `workspaces.json`. The authorization is persisted first, then applied at runtime. This permission gates only `apply_controlled_patch`; it is independent of the Codex `run_task` sandbox and is not required for the Owner-approved full-access Codex lane.
 
 ## `generate_controlled_patch`
 

@@ -88,3 +88,23 @@ Canonical authority：
 - `D:\shoestring-goal\docs\CODEX_PROFILE_SELECTOR.md`
 - `D:\AI_Knowledge_Base\wiki\global\CODEX_MULTI_ACCOUNT_PLUGIN.md`
 
+## 2026-09-08 Owner-approved Codex full-access override
+
+Owner explicitly approved Engineering Bridge Codex CLI tasks to use Codex
+`danger-full-access` as the normal `run_task` default because the previous
+hard-coded read-only sandbox blocked ordinary engineering work.
+
+- MCP `run_task` with executor `codex` defaults to `danger-full-access`.
+- A caller may explicitly narrow a Codex task to `workspace-write` or
+  `read-only` when the task requires less authority.
+- DSH remains pinned to `read-only`; callers cannot expand its sandbox.
+- Controlled patch generation/refinement remain read-only because they use the
+  proposal path without a full-access sandbox request.
+- `authorize_workspace_write` continues to govern controlled-patch `APPLY`
+  only; it is not the switch for Codex full access.
+- Full access changes the local Codex execution sandbox only. It does not grant
+  Git push, I/W, production activation, secret disclosure, or any project-level
+  authority that the target repository separately reserves to the Owner.
+- Never read, log, copy, or rewrite Codex token/auth payloads to implement this
+  permission mode.
+

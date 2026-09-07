@@ -17,6 +17,7 @@ function receipt(taskId = newId()): Omit<ExecutionReceiptRecord, "recordedAt"> {
     workspaceRoot: ROOT,
     executor: "codex",
     operation: "run_task",
+    sandbox: "read-only",
     readOnly: true,
     state: "completed"
   };
@@ -40,6 +41,7 @@ test("persists only bounded provenance fields and survives reload", async () => 
     "operation",
     "readOnly",
     "recordedAt",
+    "sandbox",
     "state",
     "taskId",
     "workspaceId",
@@ -58,6 +60,7 @@ test("persists only bounded provenance fields and survives reload", async () => 
     "operation",
     "read_only",
     "recorded_at",
+    "sandbox",
     "state",
     "task_id",
     "workspace_id",
@@ -68,6 +71,40 @@ test("persists only bounded provenance fields and survives reload", async () => 
   await restored.load();
   assert.equal(restored.get(taskId)?.workspaceRoot, ROOT);
   assert.equal(restored.get(taskId)?.state, "completed");
+  assert.equal(restored.get(taskId)?.sandbox, "read-only");
+});
+
+test("persists full-access provenance honestly and keeps legacy read-only receipts compatible", async () => {
+  const root = mkdtempSync(join(tmpdir(), "engineering-bridge-receipts-sandbox-"));
+  const statePath = join(root, "receipts.json");
+  const store = new ExecutionReceiptStore(statePath);
+  const taskId = newId();
+  await store.record({
+    ...receipt(taskId),
+    sandbox: "danger-full-access",
+    readOnly: false
+  });
+  assert.equal(store.get(taskId)?.sandbox, "danger-full-access");
+  assert.equal(store.get(taskId)?.readOnly, false);
+
+  const legacyTaskId = newId();
+  writeFileSync(statePath, `${JSON.stringify({
+    version: 1,
+    receipts: [{
+      task_id: legacyTaskId,
+      workspace_id: "known",
+      workspace_root: ROOT,
+      executor: "codex",
+      operation: "run_task",
+      read_only: true,
+      state: "completed",
+      recorded_at: new Date().toISOString()
+    }]
+  })}\n`, "utf8");
+  const restoredLegacy = new ExecutionReceiptStore(statePath);
+  await restoredLegacy.load();
+  assert.equal(restoredLegacy.get(legacyTaskId)?.sandbox, "read-only");
+  assert.equal(restoredLegacy.get(legacyTaskId)?.readOnly, true);
 });
 
 test("persists optional Codex account identity without credential material", async () => {

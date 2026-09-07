@@ -110,6 +110,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     assert.equal(typeof runTaskProperties?.reasoning, "object");
     assert.equal(runTaskProperties?.account?.type, "string");
     assert.equal(typeof runTaskProperties?.web_research, "object");
+    assert.equal(typeof runTaskProperties?.sandbox, "object");
     assert.equal(typeof runTaskProperties?.preflight_receipt, "object");
     assert.equal(typeof schemas.get("generate_controlled_patch")?.properties?.preflight_receipt, "object");
     assert.equal(typeof schemas.get("refine_controlled_patch")?.properties?.preflight_receipt, "object");
@@ -126,6 +127,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", reasoning: "medium" }],
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", account: "A" }],
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", web_research: true }],
+      ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", sandbox: "danger-full-access" }],
       ["generate_controlled_patch", { workspace_id: "missing", change_request: "change", executor: "dsh", reasoning_effort: "high" }],
       ["refine_controlled_patch", { patch_task_id: "missing", change_request: "refine", executor: "dsh", model: "gpt-5-codex" }]
     ] as const) {

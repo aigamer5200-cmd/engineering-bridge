@@ -3,7 +3,7 @@ import { serializeError } from "../core/errors.js";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 import { CoreError } from "../core/errors.js";
-import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort } from "../executors/executor.js";
+import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort, SandboxMode } from "../executors/executor.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
@@ -22,6 +22,7 @@ export interface RegisteredWorkspaceTaskRequest {
   readonly reasoning_effort?: string;
   readonly account?: string;
   readonly web_research?: boolean;
+  readonly sandbox?: SandboxMode;
   readonly preflight_receipt?: KnowledgePreflightReceipt;
 }
 
@@ -37,7 +38,8 @@ function normalizeTaskRequest(request: RegisteredWorkspaceTaskRequest): Normaliz
     request.reasoning !== undefined ||
     request.reasoning_effort !== undefined ||
     request.account !== undefined ||
-    request.web_research === true
+    request.web_research === true ||
+    (request.sandbox !== undefined && request.sandbox !== "read-only")
   )) {
     throw new CoreError("UNSUPPORTED_ACTION");
   }
@@ -98,6 +100,7 @@ export interface ControlledTaskView {
   readonly reasoning?: ReasoningEffort | undefined;
   readonly reasoning_effort?: string | undefined;
   readonly account?: string | undefined;
+  readonly sandbox?: SandboxMode | undefined;
   // Present only for caller-submitted controlled patches: the proposal was
   // provided by the caller, not produced by an executor.
   readonly source?: "submitted" | undefined;
@@ -292,6 +295,7 @@ export class RegisteredWorkspaceTaskService {
       ...(record.request.reasoning === undefined ? {} : { reasoning: record.request.reasoning }),
       ...(record.request.reasoning_effort === undefined ? {} : { reasoning_effort: record.request.reasoning_effort }),
       ...(record.request.account === undefined ? {} : { account: record.request.account }),
+      ...(record.request.sandbox === undefined ? {} : { sandbox: record.request.sandbox }),
       evidence: record.evidence,
       ...(record.threadId === undefined ? {} : { threadId: record.threadId }),
       ...(record.diagnostics === undefined ? {} : { diagnostics: record.diagnostics })
@@ -393,10 +397,11 @@ export class RegisteredWorkspaceTaskService {
       const instruction = attachKnowledgePreflightReceipt(record.request.instruction, record.request.preflight_receipt, {
         workspaceId: record.request.workspace_id,
         workspaceRoot: registration.root,
-        executor: record.request.executor
+        executor: record.request.executor,
+        sandbox: record.request.sandbox ?? "read-only"
       });
       const result = await executor.execute({ taskId, instruction,
-        sandbox: "read-only",
+        sandbox: record.request.sandbox ?? "read-only",
         ...(record.threadId !== undefined ? { threadId: record.threadId } : {}),
         ...(record.request.model !== undefined ? { model: record.request.model } : {}),
         ...(record.request.reasoning !== undefined ? { reasoning: record.request.reasoning } : {}),
@@ -467,13 +472,15 @@ export class RegisteredWorkspaceTaskService {
       const instruction = attachKnowledgePreflightReceipt(request.instruction, request.preflight_receipt, {
         workspaceId: request.workspace_id,
         workspaceRoot,
-        executor: request.executor
+        executor: request.executor,
+        sandbox: request.sandbox ?? "read-only"
       });
       const result = await executor.execute(
         this.observer === undefined
           ? {
             taskId,
             instruction,
+            ...(request.sandbox === undefined ? {} : { sandbox: request.sandbox }),
             ...(request.model !== undefined ? { model: request.model } : {}),
             ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
             ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
@@ -483,6 +490,7 @@ export class RegisteredWorkspaceTaskService {
           : {
             taskId,
             instruction,
+            ...(request.sandbox === undefined ? {} : { sandbox: request.sandbox }),
             ...(request.model !== undefined ? { model: request.model } : {}),
             ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
             ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
@@ -600,6 +608,7 @@ export class RegisteredWorkspaceTaskService {
     if (request.executor !== "codex" || this.executionReceipts === undefined) return;
     const workspaceRoot = knownWorkspaceRoot ?? this.registry.resolve(request.workspace_id);
     const reasoning = receiptReasoning(request);
+    const sandbox = request.sandbox ?? "read-only";
     await this.executionReceipts.record({
       taskId,
       workspaceId: request.workspace_id,
@@ -609,7 +618,8 @@ export class RegisteredWorkspaceTaskService {
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(request.account === undefined ? {} : { account: request.account }),
       operation,
-      readOnly: true,
+      sandbox,
+      readOnly: sandbox === "read-only",
       state
     });
   }

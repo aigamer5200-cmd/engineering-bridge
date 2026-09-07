@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. Codex may use an explicit model, reasoning effort, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt. This tool does not modify workspace files.",
+    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Codex may also use an explicit model, reasoning effort, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
@@ -173,19 +173,22 @@ async function main(): Promise<void> {
       reasoning_effort: z.string().trim().min(1).max(100).optional(),
       account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
       web_research: z.boolean().optional().default(false),
+      sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, account, web_research, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, account, web_research, sandbox, preflight_receipt }) => {
     try {
       if (reasoning !== undefined && reasoning_effort !== undefined) {
         throw new CoreError("UNSUPPORTED_ACTION");
       }
       if (executor === "dsh" && (
         model !== undefined || reasoning !== undefined || reasoning_effort !== undefined ||
-        account !== undefined || web_research
+        account !== undefined || web_research ||
+        (sandbox !== undefined && sandbox !== "read-only")
       )) {
         throw new CoreError("UNSUPPORTED_ACTION");
       }
+      const effectiveSandbox = sandbox ?? (executor === "codex" ? "danger-full-access" : "read-only");
       const { taskId } = service.startTask({
         workspace_id,
         instruction,
@@ -195,6 +198,7 @@ async function main(): Promise<void> {
         ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
         ...(account === undefined ? {} : { account }),
         ...(web_research ? { web_research: true } : {}),
+        sandbox: effectiveSandbox,
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
       });
       return jsonContent({ task_id: taskId });
@@ -221,6 +225,7 @@ async function main(): Promise<void> {
       ...(view.reasoning === undefined ? {} : { reasoning: view.reasoning }),
       ...(view.reasoning_effort === undefined ? {} : { reasoning_effort: view.reasoning_effort }),
       ...(view.account === undefined ? {} : { account: view.account }),
+      ...(view.sandbox === undefined ? {} : { sandbox: view.sandbox }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
       ...(view.output === undefined ? {} : { output: view.output }),
@@ -238,6 +243,7 @@ async function main(): Promise<void> {
           ...(receipt.reasoning === undefined ? {} : { reasoning: receipt.reasoning }),
           ...(receipt.account === undefined ? {} : { account: receipt.account }),
           operation: receipt.operation,
+          sandbox: receipt.sandbox,
           read_only: receipt.readOnly,
           state: receipt.state,
           recorded_at: receipt.recordedAt
@@ -299,7 +305,7 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("authorize_workspace_write", {
-    description: "Grant persistent controlled-write authorization to a managed workspace after exact AUTHORIZE confirmation. Manual workspaces remain authoritative through workspaces.json. Ordinary run_task calls stay read-only.",
+    description: "Grant persistent controlled-patch authorization to a managed workspace after exact AUTHORIZE confirmation. Manual workspaces remain authoritative through workspaces.json. This permission gates APPLY only and is independent of the Codex run_task sandbox.",
     inputSchema: {
       workspace_id: z.string().min(1),
       confirmation: z.literal("AUTHORIZE")

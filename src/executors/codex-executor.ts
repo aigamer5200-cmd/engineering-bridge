@@ -464,9 +464,11 @@ export class CodexExecutor implements Executor {
       const threadResult = await this.call(request.threadId ? "thread/resume" : "thread/start", threadParams);
       if (!object(threadResult) || !object(threadResult.thread) || typeof threadResult.thread.id !== "string") throw new Error();
       this.threadId = threadResult.thread.id;
-      const sandboxPolicy = sandbox === "workspace-write"
-        ? { type: "workspaceWrite", writableRoots: [this.workspaceRoot], networkAccess: false }
-        : { type: "readOnly", networkAccess: false };
+      const sandboxPolicy = sandbox === "danger-full-access"
+        ? { type: "dangerFullAccess" }
+        : sandbox === "workspace-write"
+          ? { type: "workspaceWrite", writableRoots: [this.workspaceRoot], networkAccess: false }
+          : { type: "readOnly", networkAccess: false };
       const turnParams: Record<string, unknown> = {
         threadId: this.threadId, input: [{ type: "text", text: request.instruction }],
         cwd: this.workspaceRoot, approvalPolicy: "never", sandboxPolicy

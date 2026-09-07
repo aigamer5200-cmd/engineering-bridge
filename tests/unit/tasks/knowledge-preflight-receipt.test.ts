@@ -22,7 +22,8 @@ test("attaches a bounded receipt and exact registered execution boundary", () =>
   const rendered = attachKnowledgePreflightReceipt(instruction, receipt, {
     workspaceId: "biaogu-wt",
     workspaceRoot: "D:/WORKTREE_ZONE/biaogu-wt",
-    executor: "codex"
+    executor: "codex",
+    sandbox: "danger-full-access"
   });
 
   assert.match(rendered, /Knowledge Preflight Receipt/u);
@@ -30,7 +31,7 @@ test("attaches a bounded receipt and exact registered execution boundary", () =>
   assert.match(rendered, /goal_id: bridge-preflight-v1/u);
   assert.match(rendered, /workspace_id: biaogu-wt/u);
   assert.match(rendered, /workspace_root: D:\/WORKTREE_ZONE\/biaogu-wt/u);
-  assert.match(rendered, /sandbox: read-only/u);
+  assert.match(rendered, /sandbox: danger-full-access/u);
   assert.match(rendered, /does not grant write, release, credential, or scope-expansion authority/u);
   assert.equal(rendered.endsWith(`Task instruction:\n${instruction}`), true);
 });
@@ -40,7 +41,8 @@ test("keeps legacy calls byte-for-byte unchanged when no receipt is supplied", (
   assert.equal(attachKnowledgePreflightReceipt(instruction, undefined, {
     workspaceId: "known",
     workspaceRoot: "/registered/root",
-    executor: "dsh"
+    executor: "dsh",
+    sandbox: "read-only"
   }), instruction);
 });
 

@@ -101,7 +101,7 @@ async function waitForInteractiveReady(service: RegisteredWorkspaceTaskService, 
   }
 }
 
-test("Bridge persists read-only Codex execution provenance for interactive run_task", async () => {
+test("Bridge persists exact Codex sandbox provenance for interactive run_task", async () => {
   const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipt-")), "receipts.json");
   const receipts = new ExecutionReceiptStore(statePath);
   await receipts.load();
@@ -110,7 +110,12 @@ test("Bridge persists read-only Codex execution provenance for interactive run_t
   };
   const service = new RegisteredWorkspaceTaskService(registry(), () => executor, receipts);
 
-  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect", executor: "codex" });
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "codex",
+    sandbox: "danger-full-access"
+  });
   await waitForInteractiveReady(service, taskId);
 
   const ready = receipts.get(taskId);
@@ -118,7 +123,8 @@ test("Bridge persists read-only Codex execution provenance for interactive run_t
   assert.equal(ready?.workspaceRoot, ROOT);
   assert.equal(ready?.operation, "run_task");
   assert.equal(ready?.executor, "codex");
-  assert.equal(ready?.readOnly, true);
+  assert.equal(ready?.sandbox, "danger-full-access");
+  assert.equal(ready?.readOnly, false);
   assert.equal(ready?.state, "waiting_for_supervisor_review");
 
   await service.controlTask(taskId, "accept");
@@ -973,7 +979,7 @@ test("legacy controlled-patch taskView reports the fixed codex executor without 
   assert.equal(view?.threadId, undefined);
 });
 
-test("interactive execution remains read-only when workspace writes are allowed", async () => {
+test("interactive execution uses the explicitly requested sandbox independent of controlled-write authorization", async () => {
   const calls: ExecutorRequest[] = [];
   const executor: Executor = {
     execute: async (request) => { calls.push(request); return { kind: "completed", output: "done" }; }
@@ -982,14 +988,31 @@ test("interactive execution remains read-only when workspace writes are allowed"
     { id: "known", root: ROOT, allow_write: true }
   ]);
   const service = new RegisteredWorkspaceTaskService(writableRegistry, () => executor);
-  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect" });
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    sandbox: "danger-full-access"
+  });
 
   while (service.taskView(taskId)?.state === "queued" || service.taskView(taskId)?.state === "running") {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.sandbox, "read-only");
+  assert.equal(calls[0]?.sandbox, "danger-full-access");
+  assert.equal(service.taskView(taskId)?.sandbox, "danger-full-access");
+});
+
+test("DSH rejects any sandbox expansion beyond read-only", () => {
+  const service = new RegisteredWorkspaceTaskService(registry(), () => ({
+    execute: async () => ({ kind: "completed", output: "done" })
+  }));
+  assert.throws(() => service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "dsh",
+    sandbox: "danger-full-access"
+  }));
 });
 
 test("normalizes and fixes the executor selection for each interactive task", async () => {

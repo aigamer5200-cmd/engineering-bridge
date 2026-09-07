@@ -1,5 +1,37 @@
 # Release notes
 
+## v1.4.2-biaogu.2
+
+This Owner-authorized local release removes the hard-coded read-only sandbox
+from ordinary Codex `run_task` execution while preserving the existing
+controlled-patch and DSH safety lanes.
+
+### Codex full access
+
+- Codex MCP `run_task` now defaults to native `danger-full-access`.
+- Callers may explicitly narrow a Codex task to `workspace-write` or
+  `read-only`.
+- `task_result` and the durable Bridge execution receipt report the exact
+  sandbox and truthful `read_only` value.
+- Supervisor `continue` retains the task's original sandbox.
+
+### Preserved boundaries
+
+- DSH remains pinned read-only and rejects sandbox expansion.
+- Controlled patch generation/refinement remain read-only; `AUTHORIZE` still
+  gates controlled-patch `APPLY` only.
+- No Codex auth/token payload or `CODEX_HOME` credential file is modified by
+  this release.
+- Full access does not imply Git push, I/W, production activation, or any
+  target-repository authority reserved to its Owner.
+
+### Validation checkpoint
+
+- TypeScript typecheck: PASS.
+- Full unit suite: 385 tests, 380 passed, 0 failed, 5 platform skips.
+- Native app-server mapping is covered for `danger-full-access` ->
+  `dangerFullAccess`.
+
 ## v1.4.2-biaogu.1
 
 This Biaogu integration release reconciles upstream `v1.4.2` into the current
