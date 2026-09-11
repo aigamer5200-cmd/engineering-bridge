@@ -1039,7 +1039,7 @@ test("normalizes and fixes the executor selection for each interactive task", as
   ]);
 });
 
-test("forwards Codex model selection through legacy and interactive task paths", async () => {
+test("forwards Codex model/reasoning/service-tier selection through legacy and interactive task paths", async () => {
   const calls: ExecutorRequest[] = [];
   const executor: Executor = {
     execute: async (request) => {
@@ -1053,7 +1053,8 @@ test("forwards Codex model selection through legacy and interactive task paths",
     workspace_id: "known",
     instruction: "legacy",
     model: "gpt-5-codex",
-    reasoning_effort: "high"
+    reasoning_effort: "high",
+    service_tier: "priority"
   } as Parameters<RegisteredWorkspaceTaskService["runTask"]>[0] & {
     model: string;
     reasoning_effort: string;
@@ -1064,7 +1065,8 @@ test("forwards Codex model selection through legacy and interactive task paths",
     workspace_id: "known",
     instruction: "interactive",
     model: "gpt-5-codex",
-    reasoning_effort: "high"
+    reasoning_effort: "high",
+    service_tier: "standard"
   } as Parameters<RegisteredWorkspaceTaskService["startTask"]>[0] & {
     model: string;
     reasoning_effort: string;
@@ -1072,17 +1074,19 @@ test("forwards Codex model selection through legacy and interactive task paths",
   await waitForInteractiveReady(service, interactive.taskId);
 
   assert.deepEqual(calls.map((request) => {
-    const selected = request as ExecutorRequest & { model?: string; reasoning_effort?: string };
+    const selected = request as ExecutorRequest & { model?: string; reasoning_effort?: string; service_tier?: string };
     return {
       taskId: selected.taskId,
       instruction: selected.instruction,
       model: selected.model,
-      reasoning_effort: selected.reasoning_effort
+      reasoning_effort: selected.reasoning_effort,
+      service_tier: selected.service_tier
     };
   }), [
-    { taskId: legacy.taskId, instruction: "legacy", model: "gpt-5-codex", reasoning_effort: "high" },
-    { taskId: interactive.taskId, instruction: "interactive", model: "gpt-5-codex", reasoning_effort: "high" }
+    { taskId: legacy.taskId, instruction: "legacy", model: "gpt-5-codex", reasoning_effort: "high", service_tier: "priority" },
+    { taskId: interactive.taskId, instruction: "interactive", model: "gpt-5-codex", reasoning_effort: "high", service_tier: "standard" }
   ]);
+  assert.equal(service.taskView(interactive.taskId)?.service_tier, "standard");
 });
 
 test("rejects Codex-only selection fields for DSH tasks", () => {
@@ -1104,6 +1108,14 @@ test("rejects Codex-only selection fields for DSH tasks", () => {
     executor: "dsh",
     reasoning_effort: "high"
   } as Parameters<RegisteredWorkspaceTaskService["startTask"]>[0] & { reasoning_effort: string }), (error) =>
+    error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+  );
+  assert.throws(() => service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "dsh",
+    service_tier: "standard"
+  }), (error) =>
     error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
   );
 });

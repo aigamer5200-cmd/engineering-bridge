@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. Codex may use an explicit model, reasoning effort, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt. This tool does not modify workspace files.",
+    description: "Run a read-only task with the selected executor in a pre-registered workspace. Codex may use an explicit model, reasoning effort, task-local service tier, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt. This tool does not modify workspace files.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
@@ -171,17 +171,19 @@ async function main(): Promise<void> {
       model: z.string().trim().min(1).max(200).optional(),
       reasoning: z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
       reasoning_effort: z.string().trim().min(1).max(100).optional(),
+      service_tier: z.enum(["standard", "priority"]).optional(),
       account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
       web_research: z.boolean().optional().default(false),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, account, web_research, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, service_tier, account, web_research, preflight_receipt }) => {
     try {
       if (reasoning !== undefined && reasoning_effort !== undefined) {
         throw new CoreError("UNSUPPORTED_ACTION");
       }
       if (executor === "dsh" && (
         model !== undefined || reasoning !== undefined || reasoning_effort !== undefined ||
+        service_tier !== undefined ||
         account !== undefined || web_research
       )) {
         throw new CoreError("UNSUPPORTED_ACTION");
@@ -193,6 +195,7 @@ async function main(): Promise<void> {
         ...(model === undefined ? {} : { model }),
         ...(reasoning === undefined ? {} : { reasoning }),
         ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+        ...(service_tier === undefined ? {} : { service_tier }),
         ...(account === undefined ? {} : { account }),
         ...(web_research ? { web_research: true } : {}),
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
@@ -220,6 +223,7 @@ async function main(): Promise<void> {
       ...(view.model === undefined ? {} : { model: view.model }),
       ...(view.reasoning === undefined ? {} : { reasoning: view.reasoning }),
       ...(view.reasoning_effort === undefined ? {} : { reasoning_effort: view.reasoning_effort }),
+      ...(view.service_tier === undefined ? {} : { service_tier: view.service_tier }),
       ...(view.account === undefined ? {} : { account: view.account }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
@@ -236,6 +240,7 @@ async function main(): Promise<void> {
           executor: receipt.executor,
           ...(receipt.model === undefined ? {} : { model: receipt.model }),
           ...(receipt.reasoning === undefined ? {} : { reasoning: receipt.reasoning }),
+          ...(receipt.serviceTier === undefined ? {} : { service_tier: receipt.serviceTier }),
           ...(receipt.account === undefined ? {} : { account: receipt.account }),
           operation: receipt.operation,
           read_only: receipt.readOnly,

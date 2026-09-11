@@ -4,9 +4,9 @@ This is the tool surface of Engineering Bridge V1 (1.4.2). The local STDIO MCP s
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), and optional Codex-only `model` and `reasoning_effort`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), and optional Codex-only `model`, `reasoning` / `reasoning_effort`, `service_tier` (`standard | priority`), and `account`.
 
-Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. Codex validates requested model/reasoning support through `model/list`; DSH rejects either option. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
+Starts a supervised task with the selected executor and returns `task_id`. `run_task` is always read-only: Codex uses approval `never`, a read-only sandbox policy, and disabled network access; DSH is pinned read-only per process. Codex validates requested model/reasoning support through `model/list`; explicit service tier is sent task-locally to native `thread/start` and `turn/start`; DSH rejects Codex-only routing options. An unknown workspace becomes a failed task; it does not grant access to a new path. Explicit non-secret routing provenance is observable in `task_result` and durable execution receipts. The executor selection is fixed for the task lifetime and reported honestly in `task_result`.
 
 ## `task_result`
 

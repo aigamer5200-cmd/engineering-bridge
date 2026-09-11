@@ -457,6 +457,7 @@ export class CodexExecutor implements Executor {
       }
       const sandbox = request.sandbox ?? "read-only";
       const threadParams: Record<string, unknown> = { cwd: this.workspaceRoot, approvalPolicy: "never", sandbox };
+      if (request.service_tier !== undefined) threadParams.serviceTier = request.service_tier;
       if (request.webSearch === "live") {
         threadParams.config = { web_search: "live" };
       }
@@ -473,6 +474,7 @@ export class CodexExecutor implements Executor {
       };
       if (request.model !== undefined) turnParams.model = request.model;
       if (reasoningEffort !== undefined) turnParams.effort = reasoningEffort;
+      if (request.service_tier !== undefined) turnParams.serviceTier = request.service_tier;
       const turnResult = await this.call("turn/start", turnParams);
       if (!object(turnResult) || !object(turnResult.turn) || typeof turnResult.turn.id !== "string") throw new Error();
       this.turnId = turnResult.turn.id;

@@ -108,6 +108,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     }
     const runTaskProperties = schemas.get("run_task")?.properties;
     assert.equal(typeof runTaskProperties?.reasoning, "object");
+    assert.equal(typeof runTaskProperties?.service_tier, "object");
     assert.equal(runTaskProperties?.account?.type, "string");
     assert.equal(typeof runTaskProperties?.web_research, "object");
     assert.equal(typeof runTaskProperties?.preflight_receipt, "object");
@@ -124,6 +125,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     for (const [name, argumentsValue] of [
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", model: "gpt-5-codex" }],
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", reasoning: "medium" }],
+      ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", service_tier: "standard" }],
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", account: "A" }],
       ["run_task", { workspace_id: "missing", instruction: "inspect", executor: "dsh", web_research: true }],
       ["generate_controlled_patch", { workspace_id: "missing", change_request: "change", executor: "dsh", reasoning_effort: "high" }],
@@ -179,7 +181,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     for (const argumentsValue of [
       { workspace_id: "missing", instruction: "inspect" },
       { workspace_id: "missing", instruction: "inspect", executor: "codex" },
-      { workspace_id: "missing", instruction: "inspect", executor: "codex", model: "gpt-6-astra", reasoning: "medium" },
+      { workspace_id: "missing", instruction: "inspect", executor: "codex", model: "gpt-6-astra", reasoning: "medium", service_tier: "standard" },
       { workspace_id: "missing", instruction: "inspect", executor: "dsh" }
     ]) {
       const runResult = await client.callTool({

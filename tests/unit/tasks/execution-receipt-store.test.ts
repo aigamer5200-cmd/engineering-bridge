@@ -86,7 +86,7 @@ test("persists optional Codex account identity without credential material", asy
   assert.equal(restored.get(taskId)?.account, "A");
 });
 
-test("persists optional model and reasoning provenance without credential material", async () => {
+test("persists optional model, reasoning, and service-tier provenance without credential material", async () => {
   const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipts-profile-")), "receipts.json");
   const store = new ExecutionReceiptStore(statePath);
   const taskId = newId();
@@ -94,20 +94,24 @@ test("persists optional model and reasoning provenance without credential materi
     ...receipt(taskId),
     account: "B",
     model: "gpt-5.6-sol",
-    reasoning: "xhigh"
+    reasoning: "xhigh",
+    serviceTier: "standard"
   });
 
   assert.equal(store.get(taskId)?.model, "gpt-5.6-sol");
   assert.equal(store.get(taskId)?.reasoning, "xhigh");
+  assert.equal(store.get(taskId)?.serviceTier, "standard");
   const raw = readFileSync(statePath, "utf8");
   assert.match(raw, /"model": "gpt-5\.6-sol"/);
   assert.match(raw, /"reasoning": "xhigh"/);
+  assert.match(raw, /"service_tier": "standard"/);
   assert.doesNotMatch(raw, /auth\.json|refresh_token|access_token|api[_-]?key/i);
 
   const restored = new ExecutionReceiptStore(statePath);
   await restored.load();
   assert.equal(restored.get(taskId)?.model, "gpt-5.6-sol");
   assert.equal(restored.get(taskId)?.reasoning, "xhigh");
+  assert.equal(restored.get(taskId)?.serviceTier, "standard");
 });
 
 test("retains only the newest 500 valid receipts after load and next persist", async () => {
