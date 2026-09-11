@@ -5,6 +5,7 @@ import type { SerializedError } from "../core/errors.js";
 
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export type ServiceTier = "standard" | "priority";
 
 export interface EvidenceChange { readonly path: string; readonly diff: string }
 export interface ExecutorEvidence {
@@ -24,6 +25,8 @@ export interface ExecutorRequest {
   readonly reasoning?: ReasoningEffort;
   /** Upstream v1.4.x reasoning field. Callers must not set both aliases. */
   readonly reasoning_effort?: string;
+  /** Optional task-local Codex service tier. */
+  readonly service_tier?: ServiceTier;
   /** Optional GOAL-owned Codex account/profile alias. */
   readonly account?: string;
   /** Enables the first-party Codex live web-search tool only. */

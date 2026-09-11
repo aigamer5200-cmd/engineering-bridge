@@ -67,6 +67,22 @@ Current first slice 只接受 explicit alias（例如 A/B）。Alias 必須通�
 allowlist；指定 account 才載入 optional `xjoker/codex-switch` adapter。`AUTO` 目前
 fail-closed，不得靜默挑選一個無法在 dispatch/receipt 證明的 account。
 
+## Codex routing default / caller override boundary
+
+- Engineering Bridge 的 machine-global Codex default 由 repo 外 runtime profile 管理；Owner
+  現行正式 default 是 exact `gpt-5.6-luna` + reasoning=`max` + service tier=`priority`。
+- Bridge Core 不得自行推論 GOAL。一般 DS -> Bridge -> Codex caller 省略 task-local routing
+  時，必須保留上述 global default。
+- Shoestring GOAL 的角色 routing 必須由 caller 明確帶入：只有 Child A / 明確 `A代理`
+  task 使用 exact `model=gpt-6-astra`, `reasoning=low`, `service_tier=standard`；
+  B/C/D executor task 使用 exact `model=gpt-5.6-luna`, `reasoning=max`,
+  `service_tier=priority`。Bridge 只執行並回報 caller 指定的 task-local route，
+  不得自行推論角色，也不得把 task route 寫回 global profile。
+- `service_tier` 與 `model` / `reasoning` / `account` 一樣是 Codex-only task-local routing
+  dimension；DSH + 任一 Codex-only routing field 必須 fail closed。
+- task result / durable execution receipt 必須能回報 caller 明確 pin 的非敏感 routing
+  provenance；任何 token、auth.json、email、OAuth/API secret 仍禁止持久化。
+
 Current `main` 已包含 first-slice explicit A/B routing，以及 Codex-only exact reasoning
 routing（`reasoning -> turn/start.effort`）。2026-09-05 Profile Selector / reasoning integration
 已完成 C/P + Owner I/W；B 四組 real-turn E2E 已成功，A 目前僅因 long-window quota exhausted
@@ -76,8 +92,9 @@ fail-closed。
 2026-09-05 Profile Selector extension 另外允許 GOAL 將既有 explicit `account` 與 exact
 `model`、exact `reasoning` 綁成 session Active Profile。Bridge `run_task` 的 `reasoning`
 只適用 Codex，必須映射到 native app-server `turn/start.effort`；`model` 維持
-`thread/start.model` 且禁止 provider model fallback。DSH + model/reasoning/account 必須
-fail-closed。`task_result` / execution receipt 只可保存非敏感 routing provenance，絕不可
+`thread/start.model` 且禁止 provider model fallback；task-local `service_tier` 映射到
+native `thread/start.serviceTier` 與 `turn/start.serviceTier`。DSH +
+model/reasoning/service_tier/account 必須 fail-closed。`task_result` / execution receipt 只可保存非敏感 routing provenance，絕不可
 保存 token、auth.json、email、OAuth/API secret。Selector 本身仍屬 GOAL optional layer；
 不用 Selector 時 Bridge/Core 原路徑不得受影響。
 

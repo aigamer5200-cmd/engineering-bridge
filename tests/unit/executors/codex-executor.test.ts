@@ -204,6 +204,27 @@ test("preserves the default Codex JSON-RPC flow when model selection is omitted"
   assert.ok(turnStart);
   assert.equal("model" in turnStart.params, false);
   assert.equal("effort" in turnStart.params, false);
+  assert.equal("serviceTier" in turnStart.params, false);
+});
+
+test("forwards an explicit task-local service tier to thread/start and turn/start", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "done" }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect",
+    service_tier: "standard"
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.ok(threadStart);
+  assert.ok(turnStart);
+  assert.equal(threadStart.params.serviceTier, "standard");
+  assert.equal(turnStart.params.serviceTier, "standard");
 });
 
 test("maps danger-full-access to the native Codex full-access sandbox", async () => {

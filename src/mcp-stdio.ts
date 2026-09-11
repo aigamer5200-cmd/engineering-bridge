@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Codex may also use an explicit model, reasoning effort, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt.",
+    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Codex may also use an explicit model, reasoning effort, task-local service tier, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
@@ -171,18 +171,20 @@ async function main(): Promise<void> {
       model: z.string().trim().min(1).max(200).optional(),
       reasoning: z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
       reasoning_effort: z.string().trim().min(1).max(100).optional(),
+      service_tier: z.enum(["standard", "priority"]).optional(),
       account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
       web_research: z.boolean().optional().default(false),
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, account, web_research, sandbox, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, service_tier, account, web_research, sandbox, preflight_receipt }) => {
     try {
       if (reasoning !== undefined && reasoning_effort !== undefined) {
         throw new CoreError("UNSUPPORTED_ACTION");
       }
       if (executor === "dsh" && (
         model !== undefined || reasoning !== undefined || reasoning_effort !== undefined ||
+        service_tier !== undefined ||
         account !== undefined || web_research ||
         (sandbox !== undefined && sandbox !== "read-only")
       )) {
@@ -196,6 +198,7 @@ async function main(): Promise<void> {
         ...(model === undefined ? {} : { model }),
         ...(reasoning === undefined ? {} : { reasoning }),
         ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+        ...(service_tier === undefined ? {} : { service_tier }),
         ...(account === undefined ? {} : { account }),
         ...(web_research ? { web_research: true } : {}),
         sandbox: effectiveSandbox,
@@ -224,6 +227,7 @@ async function main(): Promise<void> {
       ...(view.model === undefined ? {} : { model: view.model }),
       ...(view.reasoning === undefined ? {} : { reasoning: view.reasoning }),
       ...(view.reasoning_effort === undefined ? {} : { reasoning_effort: view.reasoning_effort }),
+      ...(view.service_tier === undefined ? {} : { service_tier: view.service_tier }),
       ...(view.account === undefined ? {} : { account: view.account }),
       ...(view.sandbox === undefined ? {} : { sandbox: view.sandbox }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
@@ -241,6 +245,7 @@ async function main(): Promise<void> {
           executor: receipt.executor,
           ...(receipt.model === undefined ? {} : { model: receipt.model }),
           ...(receipt.reasoning === undefined ? {} : { reasoning: receipt.reasoning }),
+          ...(receipt.serviceTier === undefined ? {} : { service_tier: receipt.serviceTier }),
           ...(receipt.account === undefined ? {} : { account: receipt.account }),
           operation: receipt.operation,
           sandbox: receipt.sandbox,

@@ -3,7 +3,7 @@ import { open, readFile, rename, unlink } from "node:fs/promises";
 import { CoreError } from "../core/errors.js";
 import { isId } from "../core/ids.js";
 import type { Id } from "../core/ids.js";
-import type { ReasoningEffort, SandboxMode } from "../executors/executor.js";
+import type { ReasoningEffort, SandboxMode, ServiceTier } from "../executors/executor.js";
 
 export type ExecutionReceiptOperation =
   | "run_task"
@@ -19,6 +19,7 @@ export interface ExecutionReceiptRecord {
   readonly executor: "codex";
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
+  readonly serviceTier?: ServiceTier;
   readonly account?: string;
   readonly operation: ExecutionReceiptOperation;
   readonly sandbox: SandboxMode;
@@ -91,6 +92,7 @@ export class ExecutionReceiptStore {
         executor: input.executor,
         ...(input.model === undefined ? {} : { model: input.model }),
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+        ...(input.serviceTier === undefined ? {} : { serviceTier: input.serviceTier }),
         ...(input.account === undefined ? {} : { account: input.account }),
         operation: input.operation,
         sandbox: input.sandbox,
@@ -154,6 +156,7 @@ export class ExecutionReceiptStore {
         executor: record.executor,
         ...(record.model === undefined ? {} : { model: record.model }),
         ...(record.reasoning === undefined ? {} : { reasoning: record.reasoning }),
+        ...(record.serviceTier === undefined ? {} : { service_tier: record.serviceTier }),
         ...(record.account === undefined ? {} : { account: record.account }),
         operation: record.operation,
         sandbox: record.sandbox,
@@ -201,6 +204,7 @@ function parseRecord(item: unknown): ExecutionReceiptRecord | undefined {
     executor: "codex",
     ...(typeof item.model === "string" && item.model.length > 0 ? { model: item.model } : {}),
     ...(isReasoningEffort(item.reasoning) ? { reasoning: item.reasoning } : {}),
+    ...(isServiceTier(item.service_tier) ? { serviceTier: item.service_tier } : {}),
     ...(typeof item.account === "string" && item.account.length > 0 ? { account: item.account } : {}),
     operation: item.operation,
     sandbox: isSandboxMode(item.sandbox)
@@ -231,6 +235,7 @@ function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boo
     a.executor === b.executor &&
     a.model === b.model &&
     a.reasoning === b.reasoning &&
+    a.serviceTier === b.serviceTier &&
     a.account === b.account &&
     a.operation === b.operation &&
     a.sandbox === b.sandbox &&
@@ -248,4 +253,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function isReasoningEffort(value: unknown): value is ReasoningEffort {
   return value === "low" || value === "medium" || value === "high" ||
     value === "xhigh" || value === "max" || value === "ultra";
+}
+
+function isServiceTier(value: unknown): value is ServiceTier {
+  return value === "standard" || value === "priority";
 }

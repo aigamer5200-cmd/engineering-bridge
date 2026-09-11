@@ -3,7 +3,7 @@ import { serializeError } from "../core/errors.js";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 import { CoreError } from "../core/errors.js";
-import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort, SandboxMode } from "../executors/executor.js";
+import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort, SandboxMode, ServiceTier } from "../executors/executor.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
@@ -20,6 +20,7 @@ export interface RegisteredWorkspaceTaskRequest {
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
   readonly reasoning_effort?: string;
+  readonly service_tier?: ServiceTier;
   readonly account?: string;
   readonly web_research?: boolean;
   readonly sandbox?: SandboxMode;
@@ -37,6 +38,7 @@ function normalizeTaskRequest(request: RegisteredWorkspaceTaskRequest): Normaliz
     request.model !== undefined ||
     request.reasoning !== undefined ||
     request.reasoning_effort !== undefined ||
+    request.service_tier !== undefined ||
     request.account !== undefined ||
     request.web_research === true ||
     (request.sandbox !== undefined && request.sandbox !== "read-only")
@@ -99,6 +101,7 @@ export interface ControlledTaskView {
   readonly model?: string | undefined;
   readonly reasoning?: ReasoningEffort | undefined;
   readonly reasoning_effort?: string | undefined;
+  readonly service_tier?: ServiceTier | undefined;
   readonly account?: string | undefined;
   readonly sandbox?: SandboxMode | undefined;
   // Present only for caller-submitted controlled patches: the proposal was
@@ -294,6 +297,7 @@ export class RegisteredWorkspaceTaskService {
       ...(record.request.model === undefined ? {} : { model: record.request.model }),
       ...(record.request.reasoning === undefined ? {} : { reasoning: record.request.reasoning }),
       ...(record.request.reasoning_effort === undefined ? {} : { reasoning_effort: record.request.reasoning_effort }),
+      ...(record.request.service_tier === undefined ? {} : { service_tier: record.request.service_tier }),
       ...(record.request.account === undefined ? {} : { account: record.request.account }),
       ...(record.request.sandbox === undefined ? {} : { sandbox: record.request.sandbox }),
       evidence: record.evidence,
@@ -406,6 +410,7 @@ export class RegisteredWorkspaceTaskService {
         ...(record.request.model !== undefined ? { model: record.request.model } : {}),
         ...(record.request.reasoning !== undefined ? { reasoning: record.request.reasoning } : {}),
         ...(record.request.reasoning_effort !== undefined ? { reasoning_effort: record.request.reasoning_effort } : {}),
+        ...(record.request.service_tier !== undefined ? { service_tier: record.request.service_tier } : {}),
         ...(record.request.account !== undefined ? { account: record.request.account } : {}),
         ...(record.request.web_research === true ? { webSearch: "live" as const } : {}),
         onEvidence: (items) => {
@@ -484,6 +489,7 @@ export class RegisteredWorkspaceTaskService {
             ...(request.model !== undefined ? { model: request.model } : {}),
             ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
             ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
+            ...(request.service_tier !== undefined ? { service_tier: request.service_tier } : {}),
             ...(request.account !== undefined ? { account: request.account } : {}),
             ...(request.web_research === true ? { webSearch: "live" as const } : {})
           }
@@ -494,6 +500,7 @@ export class RegisteredWorkspaceTaskService {
             ...(request.model !== undefined ? { model: request.model } : {}),
             ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
             ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
+            ...(request.service_tier !== undefined ? { service_tier: request.service_tier } : {}),
             ...(request.account !== undefined ? { account: request.account } : {}),
             ...(request.web_research === true ? { webSearch: "live" as const } : {}),
             onEvidence: (items) => this.observeEvidence(taskId, request.executor, items)
@@ -616,6 +623,7 @@ export class RegisteredWorkspaceTaskService {
       executor: "codex",
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(reasoning === undefined ? {} : { reasoning }),
+      ...(request.service_tier === undefined ? {} : { serviceTier: request.service_tier }),
       ...(request.account === undefined ? {} : { account: request.account }),
       operation,
       sandbox,

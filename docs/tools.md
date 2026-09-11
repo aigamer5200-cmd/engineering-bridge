@@ -4,9 +4,9 @@ This is the tool surface of Engineering Bridge V1 (1.4.2). The local STDIO MCP s
 
 ## `run_task`
 
-Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `sandbox` (`read-only | workspace-write | danger-full-access`), and optional Codex-only `model` and `reasoning_effort`.
+Inputs: `workspace_id`, `instruction`, optional `executor` (`"codex" | "dsh"`, default `codex`), optional `sandbox` (`read-only | workspace-write | danger-full-access`), and optional Codex-only `model`, `reasoning` / `reasoning_effort`, `service_tier` (`standard | priority`), and `account`.
 
-Starts a supervised task with the selected executor and returns `task_id`. Codex defaults to `danger-full-access` under the Owner-approved local policy; callers may explicitly narrow a task to `workspace-write` or `read-only`. DSH is always pinned read-only and rejects sandbox expansion. Codex validates requested model/reasoning support through `model/list`. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor and sandbox are fixed for the task lifetime and reported honestly in `task_result` and the Bridge execution receipt.
+Starts a supervised task with the selected executor and returns `task_id`. Codex defaults to `danger-full-access` under the Owner-approved local policy; callers may explicitly narrow a task to `workspace-write` or `read-only`. DSH is always pinned read-only and rejects sandbox expansion or Codex-only routing options. Codex validates requested model/reasoning support through `model/list`; explicit service tier is sent task-locally to native `thread/start` and `turn/start`. An unknown workspace becomes a failed task; it does not grant access to a new path. The executor and sandbox are fixed for the task lifetime, and explicit non-secret routing provenance is observable in `task_result` and durable execution receipts.
 
 ## `task_result`
 
