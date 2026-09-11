@@ -1,6 +1,6 @@
 {
   "name": "engineering-bridge",
-  "version": "1.4.2-biaogu.2",
+  "version": "1.4.2-biaogu.3",
   "description": "A local MCP bridge for supervised Codex tasks, read-only DSH tasks, and controlled patch application.",
   "type": "module",
   "files": [

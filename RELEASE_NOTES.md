@@ -1,5 +1,45 @@
 # Release notes
 
+## v1.4.2-biaogu.3
+
+This release keeps the Owner-approved `1.4.2-biaogu.2` Codex full-access
+execution behavior and adds an exact task-local service-tier routing dimension.
+It is the production runtime required by the 2026-09-11 GOAL role-routing split.
+
+### Task-local Codex routing
+
+- `run_task` accepts optional Codex-only `service_tier=standard|priority`.
+- An explicit tier is forwarded to native Codex app-server
+  `thread/start.serviceTier` and `turn/start.serviceTier`.
+- `task_result` and durable execution receipts preserve the explicit
+  non-secret service-tier provenance.
+- DSH rejects the Codex-only service-tier field and remains read-only.
+
+### Preserved `biaogu.2` behavior
+
+- Codex `run_task` still defaults to `danger-full-access` under the explicit
+  Owner-approved local policy, with optional narrowing to `workspace-write` or
+  `read-only`.
+- Controlled-patch proposal paths and DSH remain read-only.
+- Sandbox provenance and truthful `read_only` receipt semantics are retained.
+
+### GOAL routing policy
+
+- Engineering Bridge itself does not infer GOAL roles.
+- Machine-global / ordinary executor default remains
+  `gpt-5.6-luna / max / priority`.
+- GOAL callers pin Child A / explicit `A代理` as
+  `gpt-6-astra / low / standard`.
+- GOAL B/C/D executors pin `gpt-5.6-luna / max / priority`; task complexity no
+  longer auto-escalates executor model cost.
+
+### Validation checkpoint
+
+- TypeScript build/typecheck: PASS via `npm test`.
+- Full unit suite: 386 tests, 381 passed, 0 failed, 5 platform skips.
+- Full-access sandbox mapping and task-local service-tier forwarding are both
+  covered in the merged regression suite.
+
 ## v1.4.2-biaogu.2
 
 This Owner-authorized local release removes the hard-coded read-only sandbox
