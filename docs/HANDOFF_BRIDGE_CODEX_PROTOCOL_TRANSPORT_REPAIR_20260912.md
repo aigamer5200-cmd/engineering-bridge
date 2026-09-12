@@ -2,11 +2,10 @@
 
 Date: 2026-09-12
 
-## `.6` account runtime failover candidate checkpoint
+## `.6` account runtime failover production closeout
 
-The `.5` quota guard has now been extended in source to the Owner-requested
-bounded A/B runtime failover controller. This checkpoint is still on the repair
-branch and is **not yet Production** at the time of this section.
+The `.5` quota guard has now been extended, validated, promoted, and accepted
+as the Owner-requested bounded A/B runtime failover controller.
 
 Implemented source behavior:
 
@@ -44,9 +43,79 @@ npm run typecheck: PASS
 targeted failover/classifier/receipt/observer suites: PASS
 full suite: 413 total / 408 PASS / 0 FAIL / 5 platform skips
 target package version: 1.4.2-biaogu.6
-Production switch: pending immutable Canary acceptance
-rollback runtime: 1.4.2-biaogu.5
+source release commit: 862a17b803da9e8271378a08cc6cdf89a4678635
+source branch push: PASS
+immutable prepare: PASS
+Canary A: PASS
+Canary B -> A failover: PASS
+Production switch: PASS
+post-switch manager verify: PASS
+fresh Connector discovery: exact 13 tools / PASS
+Production B -> A failover smoke: PASS
+rollback runtime: 1.4.2-biaogu.5 retained
 ```
+
+Immutable runtime:
+
+```text
+version: 1.4.2-biaogu.6
+root: D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.6
+manifest commit: 862a17b803da9e8271378a08cc6cdf89a4678635
+package-lock SHA256: 95F2BC9FC6B96AFCA679D7166B2251DD2403D1EA53339002898FE085772B16CD
+prepare validation: npm ci / typecheck / npm test / build = PASS
+```
+
+Live Canary acceptance covered both the normal healthy-account path and a real
+quota failover path. The B Canary was submitted with the normal exact profile
+`gpt-5.6-luna / max / priority`; B was still inside its active five-hour quota
+ceiling, and the observer recorded:
+
+```text
+task: 66a1302d-3852-4e8d-8979-0f297b0eefe4
+from_account: B
+to_account: A
+reason: ACCOUNT_5H_QUOTA_EXHAUSTED
+quota_window: 5h
+retry_count: 1
+new account-bound thread: PASS
+marker: BRIDGE_CANARY_OK
+sandbox unchanged: PASS
+```
+
+Guarded Production switch completed at 2026-09-12T04:10:15Z with `.5` retained
+as `previous_version`. Post-switch manager verification returned PASS for local
+and public MCP/OAuth health and kept the machine-global execution profile at
+`gpt-5.6-luna / max / priority`.
+
+Fresh Web ChatGPT Connector discovery after promotion exposed the exact 13-tool
+1.4.2 surface and the expected `run_task` account/model/reasoning/service-tier/
+sandbox inputs.
+
+The final Production Connector smoke deliberately requested the currently
+quota-exhausted B account and verified the resolved route through `task_result`:
+
+```text
+task: 5d209c72-2a84-4936-b468-cb9c9802e18f
+requested_account: B
+resolved_account: A
+reason: ACCOUNT_5H_QUOTA_EXHAUSTED
+quota_window: 5h
+retry_count: 1
+model: gpt-5.6-luna
+reasoning: max
+service_tier: priority
+sandbox: read-only
+new thread: PASS
+marker: BRIDGE_PRODUCTION_FAILOVER_OK
+final state after supervisor accept: completed
+```
+
+The Connector-rendered tool text displayed the Traditional-Chinese
+`owner_notice` with mojibake in this Web session. This was traced to the
+Connector presentation layer rather than Bridge data corruption: the immutable
+compiled runtime contains the correct UTF-8 literals and the durable production
+execution receipt stores the correct Unicode code points. No `.7` repair was
+needed.
 
 No credential, token, auth-file payload, API key, email address, or raw provider
 response is stored by the new failover provenance.
