@@ -254,5 +254,50 @@ This follow-up repairs the misleading failure classification. It cannot create
 provider quota that the B account does not currently have; B becomes usable
 again automatically when the provider usage window resets.
 
+### `.5` production acceptance
+
+The quota-classification follow-up completed full validation and was promoted
+through the existing painless-upgrade path:
+
+```text
+Release: 1.4.2-biaogu.5
+Source commit: 8141e83845d12da4d33ef38489632b568be0f657
+Full unit suite: 393 tests / 388 pass / 0 fail / 5 platform skips
+Immutable prepare: PASS
+Canary account A: PASS
+Production switch: PASS
+Post-switch manager verify: PASS
+Previous / rollback runtime: 1.4.2-biaogu.4
+```
+
+Fresh Connector discovery after promotion still exposed the complete 13-tool
+surface and the existing account/model/reasoning/service-tier/sandbox routing
+schema.
+
+Production account-B classification smoke:
+
+```text
+Task: 5f317d1d-9f93-48aa-a3e5-6421ee5dd9b6
+Route: B + gpt-5.6-luna / max / priority / danger-full-access
+State: failed before Codex command evidence
+Error: CODEX_ACCOUNT_QUOTA_EXHAUSTED
+Evidence: 0
+```
+
+The same production runtime immediately passed a healthy explicit-account path:
+
+```text
+Task: aeed62a2-e200-4320-a7be-06a68fd82c6b
+Route: A + gpt-5.6-luna / max / priority / danger-full-access
+State: waiting_for_supervisor_review
+Marker: BRIDGE_A_POST_QUOTA_FIX_OK
+```
+
+Therefore the previous generic `CODEX_EXECUTION_FAILED` symptom for the current
+B-account condition is closed. While B remains at provider quota 0%, the
+correct operational state is `CODEX_ACCOUNT_QUOTA_EXHAUSTED`; after the
+2026-09-12 14:39:30 Asia/Taipei reset timestamp passes, the cached guard no
+longer blocks B and the normal launch path is retried automatically.
+
 This handoff is durable enough for a fresh Web GPT / DS / Codex session to
 continue without the previous native session.
