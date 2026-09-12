@@ -1,5 +1,36 @@
 # Release notes
 
+## v1.4.2-biaogu.5
+
+This bounded account-routing repair preserves the production-accepted `.4`
+transport behavior while distinguishing an exhausted explicit Codex account
+from a Bridge execution failure.
+
+### Explicit account quota classification
+
+- When `account=A|B` is explicitly requested, Bridge now reads only the
+  non-secret local `codex-switch` usage cache for that alias before launch.
+- An alias is classified as exhausted only when the cache says the account is
+  limited, the primary usage window is at 100%, the limit reason is
+  `rate_limit_reached`, and the cached reset timestamp is still in the future.
+- That state returns `CODEX_ACCOUNT_QUOTA_EXHAUSTED` instead of the misleading
+  generic `CODEX_EXECUTION_FAILED`.
+- Once the cached reset timestamp has passed, the old exhausted entry no longer
+  blocks launch, so the account automatically resumes without a configuration
+  change.
+- Missing or malformed cache data is ignored and falls back to the existing
+  launch path. No auth/token/API-key content is read or returned.
+- Explicit account provenance is preserved: Bridge never silently substitutes
+  account A for an explicitly requested B account.
+
+### Validation checkpoint
+
+- Targeted account/error regression suite: PASS, 59 tests, 0 failed.
+- Active cached quota exhaustion is rejected before subprocess launch.
+- Expired cached quota exhaustion allows the normal Codex launch path.
+- `.4` large-frame transport, account routing, sandbox, model/reasoning, and
+  service-tier behavior remain unchanged by this bounded repair.
+
 ## v1.4.2-biaogu.4
 
 This bounded transport repair keeps the `1.4.2-biaogu.3` routing and

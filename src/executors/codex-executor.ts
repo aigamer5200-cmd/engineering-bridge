@@ -38,7 +38,7 @@ const CODEX_NODE_TARGET = ["@openai", "codex", "bin", "codex.js"] as const;
 // entries that make list and count truncation visible.
 const TRUNCATION_MARKER = "[truncated]";
 
-function failure(code: "CODEX_UNAVAILABLE" | "CODEX_ACCOUNT_UNAVAILABLE" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED" | "EXECUTOR_STALLED"): ExecutorResult {
+function failure(code: "CODEX_UNAVAILABLE" | "CODEX_ACCOUNT_UNAVAILABLE" | "CODEX_ACCOUNT_QUOTA_EXHAUSTED" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED" | "EXECUTOR_STALLED"): ExecutorResult {
   return { kind: "failed", error: serializeError(new CoreError(code)) };
 }
 function failedTurn(turn: Record<string, unknown>): ExecutorResult {

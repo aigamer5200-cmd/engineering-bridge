@@ -403,6 +403,79 @@ test("explicit Codex account fails closed when the optional router is unavailabl
   if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_UNAVAILABLE");
 });
 
+test("explicit Codex account reports an active cached quota exhaustion before launch", async () => {
+  const invocations: Invocation[] = [];
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-quota-"));
+  const switchExe = join(root, "codex-switch.exe");
+  const switchHome = join(root, "switch-home");
+  const isolatedCodexHome = join(root, "isolated-codex-home");
+  const codexBinDir = join(root, "codex-bin");
+  mkdirSync(switchHome);
+  mkdirSync(codexBinDir);
+  writeFileSync(switchExe, "stub");
+  writeFileSync(join(codexBinDir, "codex.exe"), "stub");
+  writeFileSync(join(switchHome, "cache.json"), JSON.stringify({
+    entries: {
+      B: {
+        account_limited: true,
+        rate_limit_reached_type: "rate_limit_reached",
+        primary_used: 100,
+        primary_reset: Math.floor(Date.now() / 1000) + 3600
+      }
+    }
+  }));
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "no" }, invocations), {
+    PATH: "C:\\native-path",
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
+    ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_BIN_DIR: codexBinDir,
+    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
+  }, "win32");
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "use B", account: "B" });
+
+  assert.equal(result.kind, "failed");
+  if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_QUOTA_EXHAUSTED");
+  assert.equal(invocations.length, 0);
+});
+
+test("expired cached quota exhaustion does not block a Codex account launch", async () => {
+  const invocations: Invocation[] = [];
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-quota-expired-"));
+  const switchExe = join(root, "codex-switch.exe");
+  const switchHome = join(root, "switch-home");
+  const isolatedCodexHome = join(root, "isolated-codex-home");
+  const codexBinDir = join(root, "codex-bin");
+  mkdirSync(switchHome);
+  mkdirSync(codexBinDir);
+  writeFileSync(switchExe, "stub");
+  writeFileSync(join(codexBinDir, "codex.exe"), "stub");
+  writeFileSync(join(switchHome, "cache.json"), JSON.stringify({
+    entries: {
+      B: {
+        account_limited: true,
+        rate_limit_reached_type: "rate_limit_reached",
+        primary_used: 100,
+        primary_reset: Math.floor(Date.now() / 1000) - 1
+      }
+    }
+  }));
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "after reset" }, invocations), {
+    PATH: "C:\\native-path",
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
+    ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_BIN_DIR: codexBinDir,
+    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
+  }, "win32");
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "use B", account: "B" });
+
+  assert.equal(result.kind, "completed");
+  assert.equal(invocations.length, 1);
+});
+
 test("AUTO account remains deferred instead of silently selecting a profile", async () => {
   const root = mkdtempSync(join(tmpdir(), "bridge-codex-auto-"));
   const switchExe = join(root, "codex-switch.exe");

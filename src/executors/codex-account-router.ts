@@ -1,9 +1,35 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 import { CoreError } from "../core/errors.js";
 
 const ACCOUNT_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
+
+function object(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function accountQuotaExhausted(switchHome: string, alias: string, nowMs = Date.now()): boolean {
+  const cachePath = join(switchHome, "cache.json");
+  if (!existsSync(cachePath)) return false;
+  try {
+    const cache: unknown = JSON.parse(readFileSync(cachePath, "utf8"));
+    if (!object(cache) || !object(cache.entries)) return false;
+    const entry = cache.entries[alias];
+    if (!object(entry)) return false;
+    const primaryUsed = entry.primary_used;
+    const primaryReset = entry.primary_reset;
+    return entry.account_limited === true &&
+      entry.rate_limit_reached_type === "rate_limit_reached" &&
+      typeof primaryUsed === "number" && primaryUsed >= 100 &&
+      typeof primaryReset === "number" && Number.isFinite(primaryReset) &&
+      primaryReset * 1000 > nowMs;
+  } catch {
+    // Routing must not become dependent on the optional usage cache. A missing,
+    // stale, or malformed cache simply falls back to the existing launch path.
+    return false;
+  }
+}
 
 export interface CodexAccountLaunch {
   readonly account: string;
@@ -46,6 +72,9 @@ export function resolveCodexAccountLaunch(
   const switchHome = hostEnvironment.ENGINEERING_BRIDGE_CODEX_SWITCH_HOME?.trim();
   if (switchHome !== undefined && switchHome !== "" && !isAbsolute(switchHome)) {
     throw new CoreError("CODEX_ACCOUNT_UNAVAILABLE");
+  }
+  if (switchHome && accountQuotaExhausted(switchHome, alias)) {
+    throw new CoreError("CODEX_ACCOUNT_QUOTA_EXHAUSTED");
   }
   const isolatedCodexHome = hostEnvironment.ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME?.trim();
   if (!isolatedCodexHome || !isAbsolute(isolatedCodexHome)) {

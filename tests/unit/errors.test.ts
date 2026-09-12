@@ -13,6 +13,7 @@ test("exposes the executor error codes", () => {
     "APPLY_RECOVERY_CONFLICT",
     "CODEX_UNAVAILABLE",
     "CODEX_ACCOUNT_UNAVAILABLE",
+    "CODEX_ACCOUNT_QUOTA_EXHAUSTED",
     "CODEX_PROTOCOL_ERROR",
     "CODEX_EXECUTION_FAILED",
     "EXECUTOR_STALLED",
@@ -27,6 +28,10 @@ test("exposes the executor error codes", () => {
   });
   assert.deepEqual(serializeError(new CoreError("CODEX_PROTOCOL_ERROR")), {
     code: "CODEX_PROTOCOL_ERROR", message: "Codex returned an invalid response."
+  });
+  assert.deepEqual(serializeError(new CoreError("CODEX_ACCOUNT_QUOTA_EXHAUSTED")), {
+    code: "CODEX_ACCOUNT_QUOTA_EXHAUSTED",
+    message: "The requested Codex account has exhausted its current usage window."
   });
   assert.deepEqual(serializeError(new CoreError("CODEX_EXECUTION_FAILED")), {
     code: "CODEX_EXECUTION_FAILED", message: "Codex execution failed."

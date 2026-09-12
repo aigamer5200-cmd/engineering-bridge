@@ -220,5 +220,39 @@ checkpoint. Scheduler activation, LINE enablement, GitHub Actions changes, or
 historical backfill remain governed by that product project's own explicit
 activation gates; this Bridge closeout does not perform any of them.
 
+## Follow-up: account-B quota classification repair
+
+After `.4` production acceptance, account B continued to fail before any Codex
+command evidence was emitted. Direct `codex-switch` usage inspection proved the
+account itself was at the active five-hour usage ceiling rather than suffering
+an auth/profile or Bridge transport failure:
+
+```text
+Account B plan: plus
+Primary 5h window used: 100%
+Primary remaining: 0%
+Reset credits available: 0
+Primary reset: 2026-09-12 14:39:30 Asia/Taipei
+```
+
+The B profile auth file exists and has the same required structural fields as
+the healthy A profile. The local `codex-switch` cache also reports B as
+`account_limited=true` with `rate_limit_reached` while A remains available.
+
+Release target `1.4.2-biaogu.5` therefore adds a narrow routing guard rather
+than weakening account provenance or attempting to bypass provider quota:
+
+- explicit account routing consults only the non-secret alias-keyed local
+  usage cache;
+- active 100% primary-window exhaustion returns
+  `CODEX_ACCOUNT_QUOTA_EXHAUSTED` before launching the wrapper;
+- a reset timestamp already in the past no longer blocks launch;
+- missing/malformed cache data is ignored and preserves the prior launch path;
+- explicit B never silently falls back to A.
+
+This follow-up repairs the misleading failure classification. It cannot create
+provider quota that the B account does not currently have; B becomes usable
+again automatically when the provider usage window resets.
+
 This handoff is durable enough for a fresh Web GPT / DS / Codex session to
 continue without the previous native session.
