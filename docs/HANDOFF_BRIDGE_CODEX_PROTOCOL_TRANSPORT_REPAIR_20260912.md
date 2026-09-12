@@ -118,20 +118,107 @@ npm test: PASS
 Existing dependency-audit baseline remains 3 findings (2 moderate, 1 high).
 No unrelated dependency upgrade is included in this bounded repair.
 
-## Remaining acceptance before product mainline resumes
+## Final acceptance and production closeout
 
-1. C/P this exact repair branch/checkpoint.
-2. Build immutable `1.4.2-biaogu.4` through the existing painless-upgrade
-   manager.
-3. Run isolated 8769 Canary.
-4. Run a real B + Astra/LOW/standard + `danger-full-access` audit against
-   `D:\WORKTREE_ZONE\biaogu-gcp-migration-phase6-20260910`, reading at least ten
-   real files and returning substantive architecture findings with multiple
-   commandExecution evidence items.
-5. Cross-check A + Astra/LOW and B + Luna/MAX.
-6. Only after Canary/regression PASS may Production promotion be considered.
-7. Production promotion/restart remains a separate operational authority; do
-   not silently replace `.3`.
+The repair checkpoint was committed and pushed before runtime promotion:
+
+```text
+Commit: 892e8dce5e61b37de337902d48a65ce39dc16084
+Branch: fix/codex-protocol-astra-20260912
+Push: PASS, upstream synchronized
+```
+
+Immutable `1.4.2-biaogu.4` was prepared through the existing painless-upgrade
+manager from that exact commit. Preparation validation passed `npm ci`,
+typecheck, the full test suite, and build.
+
+Initial isolated 8769 Canary with account B passed before the later B-account
+availability incident:
+
+```text
+Task: 822ebdda-0ea1-41d7-9cc9-3703c8c410c1
+Account: B
+Model profile: gpt-5.6-luna / max / priority
+Result: PASS
+```
+
+A real B + Astra/LOW long repository audit then crossed the exact large-event
+failure class that had produced `CODEX_PROTOCOL_ERROR` on `.3`: multiple large
+UTF-8 `Get-Content -Raw` commands completed and the task reached
+`waiting_for_supervisor_review` without protocol failure. This demonstrated
+that the repaired transport accepts the valid large app-server frames in the
+original workload shape.
+
+After that proof, account B began failing immediately before any command
+evidence with generic `CODEX_EXECUTION_FAILED`. The failure reproduced with
+both B + Astra and B + Luna, including the manager's own account-B Canary, while
+the same `.4` runtime passed with account A. This is therefore tracked as an
+account/upstream execution-availability incident rather than a Bridge parser
+regression. No further unbounded B retries were performed.
+
+Cross-account/runtime isolation evidence:
+
+```text
+A + Astra/LOW/standard: PASS, waiting_for_supervisor_review, evidence present
+B + Luna/MAX/priority: immediate CODEX_EXECUTION_FAILED, zero evidence
+Manager Canary account B: same immediate CODEX_EXECUTION_FAILED
+Manager Canary account A: PASS
+```
+
+Owner-authorized production promotion then switched the managed runtime from
+`.3` to `.4`:
+
+```text
+Production version: 1.4.2-biaogu.4
+Production commit: 892e8dce5e61b37de337902d48a65ce39dc16084
+Previous version / rollback target: 1.4.2-biaogu.3
+Manager switch verification: PASS
+Post-switch manager verify: PASS
+```
+
+Fresh Engineering Bridge discovery after the switch still exposed the complete
+13-tool surface, including the `run_task` account/model/reasoning/service-tier
+and sandbox routing fields.
+
+Two real post-promotion tasks were then executed through the actual production
+Connector against the Phase 6 worktree:
+
+```text
+Task: 97f576d6-ce5d-4717-af86-ab0282285693
+Route: A + gpt-6-astra / low / standard / danger-full-access
+Workload: substantive long audit, >10 real files, large UTF-8 reads
+Result: waiting_for_supervisor_review
+Marker: BRIDGE_PROD_ASTRA_LONG_AUDIT_OK
+Protocol error: none
+Target repo mutation: none
+
+Task: 268e7754-db03-42bc-9978-aa8ba00e6265
+Route: A + gpt-5.6-luna / max / priority / danger-full-access
+Workload: short production lifecycle smoke
+Result: waiting_for_supervisor_review
+Marker: BRIDGE_PROD_LUNA_OK
+Protocol error: none
+```
+
+The long production audit also demonstrated that individual failed discovery
+commands remain ordinary command evidence and do not poison a later successful
+turn, as intended by the `.4` repair.
+
+## Closeout status
+
+Engineering Bridge transport repair `1.4.2-biaogu.4` is production-accepted.
+The original false `CODEX_PROTOCOL_ERROR` blocker is closed.
+
+Account B's current generic pre-command execution failure remains an external
+availability item. Before product work intentionally depends on account B
+again, perform one bounded B smoke after that account is available; do not
+reopen the Bridge transport repair unless the failure is again specifically a
+protocol/parser error.
+
+The Taiwan-stock Phase 6 mainline may resume from its previously recorded safe
+checkpoint. Scheduler activation, LINE enablement, GitHub Actions changes, or
+historical backfill remain governed by that product project's own explicit
+activation gates; this Bridge closeout does not perform any of them.
 
 This handoff is durable enough for a fresh Web GPT / DS / Codex session to
 continue without the previous native session.
