@@ -38,6 +38,21 @@ export interface ExecutorRequest {
 export interface ExecutorDiagnostics {
   readonly executor_started_at: string;
   readonly executor_ended_at: string;
+  readonly protocol?: {
+    readonly stage: string;
+    readonly event_sequence: number;
+    readonly last_frame_bytes: number;
+    readonly last_method?: string;
+    readonly last_item_type?: string;
+    readonly final_frame_seen: boolean;
+    readonly stdout_bytes: number;
+    readonly stdout_tail_bytes: number;
+    readonly stdout_tail_sha256: string;
+    readonly stderr_bytes: number;
+    readonly stderr_tail_bytes: number;
+    readonly stderr_tail_sha256: string;
+    readonly subprocess_exit_code?: number | null;
+  };
 }
 
 export type ExecutorResult =

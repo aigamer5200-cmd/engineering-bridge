@@ -426,7 +426,16 @@ export class RegisteredWorkspaceTaskService {
       if (result.evidence !== undefined) {
         this.observeEvidence(taskId, record.request.executor, result.evidence);
       }
-      if (result.kind === "failed") { record.state = "failed"; record.error = result.error; }
+      if (result.kind === "failed") {
+        record.state = "failed";
+        record.error = result.error;
+        // Preserve only the bounded, content-free protocol metadata needed to
+        // diagnose Codex transport failures. Generic executor failures and
+        // interrupted tasks keep the previous no-diagnostics boundary.
+        if (result.error.code === "CODEX_PROTOCOL_ERROR" && result.diagnostics?.protocol !== undefined) {
+          record.diagnostics = result.diagnostics;
+        }
+      }
       else if (result.kind === "interrupted") {
         // The failed terminal state and its safe error are unchanged; the
         // executor's genuine partial output is retained separately and never

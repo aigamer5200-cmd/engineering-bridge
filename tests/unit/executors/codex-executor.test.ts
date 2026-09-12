@@ -1007,15 +1007,144 @@ test("fails promptly with bounded diagnostics for an overlong unterminated Codex
   const invocation = invocations[0];
   assert.ok(invocation);
 
-  invocation.writeStdout("x".repeat(40_000));
-  invocation.writeStdout(`${"y".repeat(40_000)}${secret}`);
+  invocation.writeStdout("x".repeat(9 * 1024 * 1024));
+  invocation.writeStdout(`${"y".repeat(9 * 1024 * 1024)}${secret}`);
 
   const result = await pending;
   assert.equal(result.kind, "failed");
   if (result.kind !== "failed") return;
   assert.equal(result.error.code, "CODEX_PROTOCOL_ERROR");
-  assert.ok(JSON.stringify(result).length <= 2_048);
+  assert.ok(JSON.stringify(result).length <= 4_096);
   assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(result.diagnostics?.protocol?.stage, "unterminated_frame_too_large");
+  assert.ok((result.diagnostics?.protocol?.stdout_bytes ?? 0) > 16 * 1024 * 1024);
+  assert.equal(result.diagnostics?.protocol?.stdout_tail_bytes, 4_096);
+  assert.match(result.diagnostics?.protocol?.stdout_tail_sha256 ?? "", /^[0-9a-f]{64}$/u);
+});
+
+test("accepts a large valid commandExecution frame without misclassifying it as a protocol error", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), process.platform, {
+    ...SHORT_TIMING,
+    executionTimeoutMs: 1_000,
+    protocolInactivityTimeoutMs: 1_000,
+    rpcCallTimeoutMs: 1_000
+  });
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect many files" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "cmd-large",
+        type: "commandExecution",
+        status: "completed",
+        command: "Get-Content several-large-files",
+        aggregatedOutput: "繁中🙂".repeat(40_000),
+        exitCode: 0,
+        durationMs: 50
+      }
+    }
+  });
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "message-1", type: "agentMessage", text: "架構稽核完成。🙂" }
+    }
+  });
+  invocation.send({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } }
+  });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  if (result.kind !== "completed") return;
+  assert.equal(result.output, "架構稽核完成。🙂");
+  assert.equal(result.evidence?.some(({ id }) => id === "cmd-large"), true);
+});
+
+test("buffers a valid Codex JSONL frame across arbitrary stdout chunks", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), process.platform, {
+    ...SHORT_TIMING,
+    executionTimeoutMs: 1_000,
+    protocolInactivityTimeoutMs: 1_000,
+    rpcCallTimeoutMs: 1_000
+  });
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  const frame = `${JSON.stringify({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "message-1", type: "agentMessage", text: "繁中分段🙂完成。" }
+    }
+  })}\n`;
+  const cut1 = Math.floor(frame.length / 3);
+  const cut2 = Math.floor(frame.length * 2 / 3);
+  invocation.writeStdout(frame.slice(0, cut1));
+  invocation.writeStdout(frame.slice(cut1, cut2));
+  invocation.writeStdout(frame.slice(cut2));
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  if (result.kind === "completed") assert.equal(result.output, "繁中分段🙂完成。");
+});
+
+test("a failed commandExecution remains evidence and does not turn a successful turn into a protocol failure", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "audit" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "cmd-failed", type: "commandExecution", status: "failed", command: "rg bad-glob" }
+    }
+  });
+  invocation.send({
+    method: "item/completed",
+    params: { threadId: "thread-1", turnId: "turn-1", item: { id: "message-1", type: "agentMessage", text: "Audit completed despite one shell miss." } }
+  });
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  assert.equal(result.evidence?.find(({ id }) => id === "cmd-failed")?.status, "failed");
+});
+
+test("ignores an unknown optional notification while preserving the active turn", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.send({ method: "future/optionalNotification", params: { threadId: "thread-1", turnId: "turn-1", optionalField: 1 } });
+  invocation.send({ method: "item/completed", params: { item: { id: "message-1", type: "agentMessage", text: "done" } } });
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
 });
 
 test("exposes only executor start/end timing metadata in structured diagnostics", async () => {

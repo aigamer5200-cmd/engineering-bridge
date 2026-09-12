@@ -17,6 +17,16 @@ There is no HTTP server, UI, database, account system, background daemon, remote
 
 `task_result` reports `queued` or `running` with `ready: false`. A successful turn moves to `waiting_for_supervisor_review` with `ready: true` and `review_output`. The response also includes the fixed `executor`, a real native `thread_id` when one exists (Codex only), the bounded, process-local `evidence` collected from command-execution and file-change protocol items, and `partial_output` when a genuine interrupt produced real partial output (the task still ends `failed`). Evidence is diagnostic task output, not authorization to write or proof that a requested semantic result is correct; when existing bounds truncate or evict evidence, explicit markers (`[truncated]`, changes-omitted counts, an `evidence-drop` item) make the incompleteness visible.
 
+Codex app-server traffic is newline-delimited JSON. A valid protocol frame may
+contain large `commandExecution.aggregatedOutput` data after repository reads,
+so Bridge buffers chunked frames and accepts a complete frame up to a defensive
+16 MiB transport ceiling; evidence extraction remains separately bounded and
+does not return the command output body. On `CODEX_PROTOCOL_ERROR`, Bridge may
+surface bounded content-free diagnostics (parser stage, event sequence, frame
+length, last method/item type, terminal-frame presence, exit code, and bounded
+stdout/stderr tail length + SHA-256). Raw stdout/stderr, instructions, response
+bodies, and credentials are not included in those diagnostics.
+
 `control_task` supplies the supervisor transitions. `continue` requires a non-empty instruction while waiting for review and resumes the same Codex thread with the task's original sandbox (DSH: a new read-only headless execution). `steer` requires a non-empty instruction while a turn is running and sends it to that turn (Codex only). `interrupt` is valid only while running; an interrupted turn ends in `failed`, not in a resumable review state. `accept` is valid only while waiting for review and promotes the reviewed output to `completed` as `output`.
 
 Active task supervision state (tasks, threads, evidence, review outputs) is process-local and disappears on restart. Controlled-patch proposal/application history, the managed workspace catalog, and validation profiles persist across restarts through three local sidecar files. Executor runs have a 15-minute hard deadline and bounded termination; active Codex turns also have a two-minute matching-protocol-activity watchdog, reset only by notifications carrying the exact active `threadId` and `turnId`; RPC responses and global or mismatched notifications cannot reset it. Short RPC calls have a separate 30-second bound. There is no automatic acceptance or persistent task/audit history.

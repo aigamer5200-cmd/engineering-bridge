@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
+import { createHash } from "node:crypto";
 import { CoreError, serializeError } from "../core/errors.js";
 import { VERSION } from "../version.js";
 import { resolveCommand } from "./command-resolution.js";
@@ -20,7 +21,13 @@ const ENVIRONMENT_ALLOWLIST = ["PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "
 const MAX_EVIDENCE = 50;
 const MAX_TEXT = 16_384;
 const MAX_EVIDENCE_BYTES = 65_536;
-const MAX_JSONL_LINE_BYTES = 65_536;
+// Codex app-server commandExecution items legitimately include aggregatedOutput
+// in the same JSONL frame. Repository reads can therefore exceed 64 KiB even
+// though the event is valid. Keep a defensive transport bound, but make it
+// large enough for normal engineering/audit output instead of treating valid
+// command output as a protocol violation.
+const MAX_JSONL_FRAME_BYTES = 16 * 1024 * 1024;
+const PROTOCOL_TAIL_BYTES = 4_096;
 const DEFAULT_RPC_CALL_TIMEOUT_MS = 30_000;
 // Official npm target of the Codex CLI, derived from a codex.cmd shim's
 // location so a Windows npm install can be launched through Node directly
@@ -62,6 +69,25 @@ function bounded(value: unknown): string {
   const retained = MAX_TEXT - TRUNCATION_MARKER.length - 1;
   return `${value.slice(0, retained)}\n${TRUNCATION_MARKER}`;
 }
+function appendProtocolTail(current: Buffer, chunk: string): Buffer {
+  const bytes = Buffer.from(chunk, "utf8");
+  const combined = current.length === 0 ? bytes : Buffer.concat([current, bytes]);
+  return combined.length <= PROTOCOL_TAIL_BYTES
+    ? combined
+    : combined.subarray(combined.length - PROTOCOL_TAIL_BYTES);
+}
+function tailSha256(value: Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+function agentMessageText(item: Record<string, unknown>): string | undefined {
+  if (typeof item.text === "string") return item.text;
+  if (!Array.isArray(item.content)) return undefined;
+  const parts = item.content
+    .filter(object)
+    .map((part) => typeof part.text === "string" ? part.text : "")
+    .filter((part) => part !== "");
+  return parts.length === 0 ? undefined : parts.join("");
+}
 
 export class CodexExecutor implements Executor {
   private child: ChildProcessWithoutNullStreams | undefined;
@@ -83,11 +109,43 @@ export class CodexExecutor implements Executor {
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
     const executorStartedAt = new Date().toISOString();
+    let protocolFailureStage: string | undefined;
+    let protocolEventSequence = 0;
+    let protocolLastFrameBytes = 0;
+    let protocolLastMethod: string | undefined;
+    let protocolLastItemType: string | undefined;
+    let protocolFinalFrameSeen = false;
+    let protocolStdoutBytes = 0;
+    let protocolStderrBytes = 0;
+    let protocolStdoutTail = Buffer.alloc(0);
+    let protocolStderrTail = Buffer.alloc(0);
+    let protocolExitCode: number | null | undefined;
+    const protocolFailure = (stage: string): ExecutorResult => {
+      protocolFailureStage ??= stage;
+      return failure("CODEX_PROTOCOL_ERROR");
+    };
     const withDiagnostics = (result: ExecutorResult): ExecutorResult => ({
       ...result,
       diagnostics: {
         executor_started_at: executorStartedAt,
-        executor_ended_at: new Date().toISOString()
+        executor_ended_at: new Date().toISOString(),
+        ...(protocolFailureStage === undefined ? {} : {
+          protocol: {
+            stage: protocolFailureStage,
+            event_sequence: protocolEventSequence,
+            last_frame_bytes: protocolLastFrameBytes,
+            ...(protocolLastMethod === undefined ? {} : { last_method: protocolLastMethod }),
+            ...(protocolLastItemType === undefined ? {} : { last_item_type: protocolLastItemType }),
+            final_frame_seen: protocolFinalFrameSeen,
+            stdout_bytes: protocolStdoutBytes,
+            stdout_tail_bytes: protocolStdoutTail.length,
+            stdout_tail_sha256: tailSha256(protocolStdoutTail),
+            stderr_bytes: protocolStderrBytes,
+            stderr_tail_bytes: protocolStderrTail.length,
+            stderr_tail_sha256: tailSha256(protocolStderrTail),
+            ...(protocolExitCode === undefined ? {} : { subprocess_exit_code: protocolExitCode })
+          }
+        })
       }
     });
     this.turnId = undefined;
@@ -306,24 +364,32 @@ export class CodexExecutor implements Executor {
     child.stdin.on("error", unavailable);
     child.stdout.on("error", unavailable);
     child.stderr.on("error", unavailable);
-    child.stderr.resume();
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      protocolStderrBytes += Buffer.byteLength(chunk, "utf8");
+      protocolStderrTail = appendProtocolTail(protocolStderrTail, chunk);
+    });
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       if (settled) return;
+      protocolStdoutBytes += Buffer.byteLength(chunk, "utf8");
+      protocolStdoutTail = appendProtocolTail(protocolStdoutTail, chunk);
       buffer += chunk;
       let newline: number;
       while ((newline = buffer.indexOf("\n")) >= 0) {
         const rawLine = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
-        if (Buffer.byteLength(rawLine, "utf8") > MAX_JSONL_LINE_BYTES) {
-          finish(failure("CODEX_PROTOCOL_ERROR"));
+        protocolLastFrameBytes = Buffer.byteLength(rawLine, "utf8");
+        if (protocolLastFrameBytes > MAX_JSONL_FRAME_BYTES) {
+          finish(protocolFailure("frame_too_large"));
           return;
         }
         const line = rawLine.trim();
         if (!line) continue;
+        protocolEventSequence += 1;
         let message: unknown;
-        try { message = JSON.parse(line); } catch { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
-        if (!object(message)) { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
+        try { message = JSON.parse(line); } catch { finish(protocolFailure("json_parse")); return; }
+        if (!object(message)) { finish(protocolFailure("message_shape")); return; }
         if (typeof message.id === "number" && ("result" in message || "error" in message)) {
           const waiter = this.pending.get(message.id);
           if (waiter) {
@@ -333,22 +399,33 @@ export class CodexExecutor implements Executor {
           }
           continue;
         }
-        if (typeof message.method !== "string" || !object(message.params)) { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
-        if (activeTurnActivity(message.params)) resetInactivityWatchdog();
+        if (typeof message.method !== "string") { finish(protocolFailure("message_method_shape")); return; }
+        protocolLastMethod = message.method;
+        if (message.params !== undefined && message.params !== null && !object(message.params)) {
+          finish(protocolFailure("message_params_shape"));
+          return;
+        }
+        const params = object(message.params) ? message.params : {};
+        if (activeTurnActivity(params)) resetInactivityWatchdog();
         if (message.method === "turn/started") {
-          const turn = object(message.params.turn) ? message.params.turn : message.params;
-          if (message.params.threadId === this.threadId &&
+          const turn = object(params.turn) ? params.turn : params;
+          if (params.threadId === this.threadId &&
             typeof turn.id === "string" &&
             (!this.turnId || turn.id === this.turnId)) {
             this.startedTurnId = turn.id;
             startInactivityWatchdog();
           }
         }
-        const item = object(message.params.item) ? message.params.item : undefined;
+        const item = object(params.item) ? params.item : undefined;
         if ((message.method === "item/started" || message.method === "item/completed") && item) {
+          protocolLastItemType = typeof item.type === "string" ? item.type : undefined;
           if (item.type === "agentMessage") {
-            if (message.method === "item/completed" && typeof item.text !== "string") { finish(failure("CODEX_PROTOCOL_ERROR")); return; }
-            if (typeof item.text === "string") output = item.text;
+            const text = agentMessageText(item);
+            if (message.method === "item/completed" && text === undefined) {
+              finish(protocolFailure("agent_message_shape"));
+              return;
+            }
+            if (text !== undefined) output = text;
           }
           const id = typeof item.id === "string" ? item.id : undefined;
           if (id && (item.type === "commandExecution" || item.type === "fileChange")) {
@@ -383,38 +460,44 @@ export class CodexExecutor implements Executor {
           }
         }
         if (message.method === "turn/completed") {
-          const turn = object(message.params.turn) ? message.params.turn : message.params;
-          if (message.params.threadId !== this.threadId ||
+          const turn = object(params.turn) ? params.turn : params;
+          if (params.threadId !== this.threadId ||
             typeof turn.id !== "string" ||
             turn.id !== (this.startedTurnId ?? this.turnId)) continue;
+          protocolFinalFrameSeen = true;
           const status = turn.status;
           const common = { threadId: this.threadId, evidence: visibleEvidence() };
           if (status === "failed") finish({ ...failedTurn(turn), ...common });
           else if (status === "interrupted") finish({ kind: "interrupted", output, ...common });
           else if (status === "completed") finish({ kind: "completed", output, ...common });
-          else finish(failure("CODEX_PROTOCOL_ERROR"));
+          else finish(protocolFailure("turn_status"));
         }
       }
-      if (Buffer.byteLength(buffer, "utf8") > MAX_JSONL_LINE_BYTES) {
-        finish(failure("CODEX_PROTOCOL_ERROR"));
+      if (Buffer.byteLength(buffer, "utf8") > MAX_JSONL_FRAME_BYTES) {
+        protocolLastFrameBytes = Buffer.byteLength(buffer, "utf8");
+        finish(protocolFailure("unterminated_frame_too_large"));
       }
     });
     const finishFromExit = (code: number | null): void => {
       if (settled) return;
+      protocolExitCode = code;
       if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       directExited = true;
       // The app-server can no longer answer. Reject RPC callers immediately;
       // descendant cleanup may continue for the bounded kill grace below.
       rejectPending();
       const result = terminationResult ?? (code === 0
-        ? failure("CODEX_PROTOCOL_ERROR")
+        ? protocolFailure("process_exit_without_terminal")
         : failure("CODEX_EXECUTION_FAILED"));
       terminationResult = result;
       if (signalProcessGroup(child, this.platform, "SIGTERM")) {
         if (killTimer === undefined) killTimer = setTimeout(forceKill, this.timing.killGraceMs);
         return;
       }
-      if (buffer.trim()) { try { JSON.parse(buffer); } catch { finish(failure("CODEX_PROTOCOL_ERROR")); return; } }
+      if (buffer.trim()) {
+        protocolLastFrameBytes = Buffer.byteLength(buffer, "utf8");
+        try { JSON.parse(buffer); } catch { finish(protocolFailure("partial_frame_on_exit")); return; }
+      }
       finish(currentTerminationResult());
     };
     child.on("exit", (code) => {
@@ -484,7 +567,7 @@ export class CodexExecutor implements Executor {
     } catch (error) {
       if (!settled) finish(error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
         ? { kind: "failed", error: serializeError(error) }
-        : failure("CODEX_PROTOCOL_ERROR"));
+        : protocolFailure("rpc_or_handshake"));
     }
     return terminalPromise;
   }

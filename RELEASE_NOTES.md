@@ -1,5 +1,46 @@
 # Release notes
 
+## v1.4.2-biaogu.4
+
+This bounded transport repair keeps the `1.4.2-biaogu.3` routing and
+`danger-full-access` policy unchanged while fixing false
+`CODEX_PROTOCOL_ERROR` failures during large Codex app-server events.
+
+### Codex protocol transport repair
+
+- Valid JSONL app-server frames are no longer rejected at the old 64 KiB
+  boundary. `commandExecution` events may legitimately carry large
+  `aggregatedOutput` values after repository reads, so Bridge now accepts valid
+  frames up to a defensive 16 MiB transport ceiling.
+- Incomplete/chunked JSONL frames continue to buffer until a newline completes
+  the frame. A truly overlong unterminated frame still fails closed.
+- A failed shell command remains diagnostic evidence and does not itself turn
+  an otherwise successful Codex turn into a protocol failure.
+- Unknown non-dangerous notification variants continue to be ignored unless
+  they violate the basic JSON-RPC envelope shape.
+- Traditional Chinese, emoji, multiline final output, and long final answers
+  remain UTF-8-safe.
+
+### Bounded failure diagnostics
+
+- `CODEX_PROTOCOL_ERROR` can now retain content-free protocol metadata such as
+  parser stage, event sequence, frame byte length, last method/item type,
+  terminal-frame presence, subprocess exit code, and bounded stdout/stderr
+  tail length + SHA-256.
+- Raw stdout, stderr, instructions, credentials, and response bodies are not
+  persisted in protocol diagnostics.
+- Generic execution failures and interrupted tasks keep the previous
+  no-protocol-diagnostics boundary.
+
+### Validation checkpoint
+
+- Root cause reproduced with a valid >64 KiB `commandExecution` frame before
+  the fix.
+- Targeted protocol regressions: PASS.
+- Full unit suite: 391 tests, 386 passed, 0 failed, 5 platform skips.
+- Existing Codex account/model/reasoning/service-tier routing, DSH read-only
+  behavior, controlled patches, and `danger-full-access` default remain green.
+
 ## v1.4.2-biaogu.3
 
 This release keeps the Owner-approved `1.4.2-biaogu.2` Codex full-access

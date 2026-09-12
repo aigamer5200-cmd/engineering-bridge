@@ -10,7 +10,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { CoreError } from "../../../src/core/errors.js";
 import type { SerializedError } from "../../../src/core/errors.js";
 import type { Id } from "../../../src/core/ids.js";
-import type { Executor, ExecutorRequest, ExecutorResult } from "../../../src/executors/executor.js";
+import type { Executor, ExecutorDiagnostics, ExecutorRequest, ExecutorResult } from "../../../src/executors/executor.js";
 import { DshExecutor } from "../../../src/executors/dsh-executor.js";
 import { RegisteredWorkspaceTaskService } from "../../../src/tasks/registered-workspace-task-service.js";
 import { ExecutionReceiptStore } from "../../../src/tasks/execution-receipt-store.js";
@@ -599,6 +599,50 @@ test("failed and interrupted interactive results do not expose executor diagnost
     assert.equal(view?.state, "failed");
     assert.equal("diagnostics" in (view ?? {}), false, result.kind);
   }
+});
+
+test("CODEX_PROTOCOL_ERROR exposes only bounded protocol diagnostics for debugging", async () => {
+  const executor: Executor = {
+    execute: async () => ({
+      kind: "failed",
+      error: { code: "CODEX_PROTOCOL_ERROR", message: "Codex returned an invalid response." },
+      diagnostics: {
+        executor_started_at: "2026-09-12T01:02:03.004Z",
+        executor_ended_at: "2026-09-12T01:02:04.005Z",
+        protocol: {
+          stage: "json_parse",
+          event_sequence: 7,
+          last_frame_bytes: 1234,
+          last_method: "item/completed",
+          last_item_type: "commandExecution",
+          final_frame_seen: false,
+          stdout_bytes: 2345,
+          stdout_tail_bytes: 4096,
+          stdout_tail_sha256: "a".repeat(64),
+          stderr_bytes: 12,
+          stderr_tail_bytes: 12,
+          stderr_tail_sha256: "b".repeat(64),
+          subprocess_exit_code: 0
+        }
+      }
+    })
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect" });
+  await waitForInteractiveReady(service, taskId);
+
+  const view = service.taskView(taskId);
+  assert.equal(view?.state, "failed");
+  assert.equal(view?.error?.code, "CODEX_PROTOCOL_ERROR");
+  const diagnostics = view?.diagnostics;
+  assert.ok(diagnostics && "executor_started_at" in diagnostics);
+  const executorDiagnostics = diagnostics as ExecutorDiagnostics;
+  assert.equal(executorDiagnostics.protocol?.stage, "json_parse");
+  assert.equal(executorDiagnostics.protocol?.event_sequence, 7);
+  assert.equal("instruction" in diagnostics, false);
+  assert.equal("output" in diagnostics, false);
+  const serialized = JSON.stringify(view);
+  assert.equal(serialized.includes("secret"), false);
 });
 
 test("run_task interrupt reaches TASK_INTERRUPTED after bounded DSH TERM and KILL without close", async () => {
