@@ -1,9 +1,16 @@
+import { execFileSync } from "node:child_process";
 import { isId, newId } from "../core/ids.js";
 import { serializeError } from "../core/errors.js";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 import { CoreError } from "../core/errors.js";
 import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort, SandboxMode, ServiceTier } from "../executors/executor.js";
+import {
+  alternateCodexAccount,
+  inspectCodexAccountUsage,
+  type CodexAccountUsageState,
+  type CodexQuotaWindow
+} from "../executors/codex-account-router.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
@@ -88,6 +95,27 @@ export type ControlledTaskDiagnostics =
     readonly executor_started_at?: never;
     readonly executor_ended_at?: never;
   };
+
+export interface FailoverContinuationReceipt {
+  readonly original_task_id: Id;
+  readonly checkpoint: "no_mutation_evidence" | "mutation_review_required" | "quota_preflight";
+  readonly evidence_count: number;
+  readonly mutation_evidence: boolean;
+}
+
+export interface FailoverProvenance {
+  readonly attempted: boolean;
+  readonly from_account?: string;
+  readonly to_account?: string;
+  readonly reason?: "ACCOUNT_5H_QUOTA_EXHAUSTED" | "ACCOUNT_WEEKLY_QUOTA_EXHAUSTED";
+  readonly quota_window?: CodexQuotaWindow;
+  readonly reset_at?: string;
+  readonly fallback_executor?: "dsh" | "ds";
+  readonly retry_count: number;
+  readonly continuation: FailoverContinuationReceipt;
+  readonly owner_notice?: string;
+}
+
 export interface ControlledTaskView {
   readonly taskId: Id;
   readonly state: ControlledTaskState;
@@ -103,7 +131,11 @@ export interface ControlledTaskView {
   readonly reasoning_effort?: string | undefined;
   readonly service_tier?: ServiceTier | undefined;
   readonly account?: string | undefined;
+  readonly requested_account?: string | undefined;
+  readonly resolved_account?: string | undefined;
+  readonly resolved_executor?: ExecutorName | undefined;
   readonly sandbox?: SandboxMode | undefined;
+  readonly failover?: FailoverProvenance | undefined;
   // Present only for caller-submitted controlled patches: the proposal was
   // provided by the caller, not produced by an executor.
   readonly source?: "submitted" | undefined;
@@ -130,7 +162,14 @@ type InteractiveRecord = {
   state: ControlledTaskState; request: NormalizedRegisteredWorkspaceTaskRequest; evidence: readonly ExecutorEvidence[];
   executor?: Executor | undefined; threadId?: string | undefined; output?: string | undefined;
   partialOutput?: string | undefined; diagnostics?: ExecutorDiagnostics | undefined; error?: SerializedError | undefined;
+  resolvedAccount?: string | undefined; resolvedExecutor?: ExecutorName | undefined;
+  failover?: FailoverProvenance | undefined; executionInstruction?: string | undefined;
 };
+
+interface WorkspaceMutationCheckpoint {
+  readonly head: string;
+  readonly clean: boolean;
+}
 
 const MAX_TERMINAL_TASK_HISTORY = 100;
 
@@ -154,6 +193,148 @@ function interruptedTaskResult(taskId: Id, partialOutput: string): RegisteredWor
   return { id: taskId, state: "failed", error: interruptedError(), partial_output: partialOutput };
 }
 
+function quotaError(state: CodexAccountUsageState): SerializedError {
+  return serializeError(new CoreError(state.quotaWindow === "weekly"
+    ? "ACCOUNT_WEEKLY_QUOTA_EXHAUSTED"
+    : "ACCOUNT_5H_QUOTA_EXHAUSTED"));
+}
+
+function quotaReason(state: CodexAccountUsageState): "ACCOUNT_5H_QUOTA_EXHAUSTED" | "ACCOUNT_WEEKLY_QUOTA_EXHAUSTED" {
+  return state.quotaWindow === "weekly"
+    ? "ACCOUNT_WEEKLY_QUOTA_EXHAUSTED"
+    : "ACCOUNT_5H_QUOTA_EXHAUSTED";
+}
+
+function hasMutationEvidence(evidence: readonly ExecutorEvidence[]): boolean {
+  return evidence.some((item) => item.type === "fileChange" && item.status !== "failed");
+}
+
+function captureWorkspaceMutationCheckpoint(workspaceRoot: string): WorkspaceMutationCheckpoint | undefined {
+  try {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+      timeout: 5_000,
+      maxBuffer: 1024 * 1024
+    }).trim();
+    const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      shell: false,
+      windowsHide: true,
+      timeout: 5_000,
+      maxBuffer: 1024 * 1024
+    });
+    return head ? { head, clean: status.trim() === "" } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function workspaceMutationIsSafe(
+  before: WorkspaceMutationCheckpoint | undefined,
+  after: WorkspaceMutationCheckpoint | undefined,
+  sandbox: SandboxMode
+): boolean {
+  if (sandbox === "read-only") return true;
+  return before !== undefined && after !== undefined &&
+    before.clean && after.clean && before.head === after.head;
+}
+
+function continuationReceipt(
+  taskId: Id,
+  checkpoint: FailoverContinuationReceipt["checkpoint"],
+  evidence: readonly ExecutorEvidence[],
+  mutationDetected = hasMutationEvidence(evidence)
+): FailoverContinuationReceipt {
+  return {
+    original_task_id: taskId,
+    checkpoint,
+    evidence_count: evidence.length,
+    mutation_evidence: mutationDetected
+  };
+}
+
+function failoverInstruction(
+  originalInstruction: string,
+  taskId: Id,
+  fromAccount: string,
+  toAccount: string | undefined,
+  reason: NonNullable<FailoverProvenance["reason"]>,
+  evidence: readonly ExecutorEvidence[],
+  fallbackExecutor?: "dsh" | "ds",
+  mutationDetected = hasMutationEvidence(evidence)
+): string {
+  const receipt = continuationReceipt(
+    taskId,
+    mutationDetected ? "mutation_review_required" : "no_mutation_evidence",
+    evidence,
+    mutationDetected
+  );
+  const lines = [
+    "Bridge Failover Continuation Receipt",
+    `original_task_id: ${taskId}`,
+    `from_account: ${fromAccount}`,
+    ...(toAccount === undefined ? [] : [`to_account: ${toAccount}`]),
+    `reason: ${reason}`,
+    ...(fallbackExecutor === undefined ? [] : [`fallback_executor: ${fallbackExecutor}`]),
+    `checkpoint: ${receipt.checkpoint}`,
+    `evidence_count: ${receipt.evidence_count}`,
+    `mutation_evidence: ${receipt.mutation_evidence}`,
+    "Native Codex thread/session state is account-bound and must not be resumed across accounts.",
+    "Continue from the current repository state. Do not repeat already-completed mutation. Inspect current state before any new mutation.",
+    "End Bridge Failover Continuation Receipt",
+    "",
+    "Original task instruction:",
+    originalInstruction
+  ];
+  return lines.join("\n");
+}
+
+function ownerFailoverNotice(
+  fromAccount: string,
+  toAccount: string,
+  state: CodexAccountUsageState,
+  request: NormalizedRegisteredWorkspaceTaskRequest
+): string {
+  const windowLabel = state.quotaWindow === "weekly" ? "週額度" : "5 小時額度";
+  const profile = [request.model, request.reasoning ?? request.reasoning_effort, request.service_tier]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" / ");
+  const reset = ownerResetTime(state.resetAt);
+  return `Account ${fromAccount} ${windowLabel}已耗盡${reset ? `（重置：${reset} Asia/Taipei）` : ""}，任務已自動切換至 Account ${toAccount}${profile ? `，維持 ${profile}` : ""} 接續執行。`;
+}
+
+function ownerDsHandoffNotice(
+  first: CodexAccountUsageState,
+  second: CodexAccountUsageState
+): string {
+  const firstReset = ownerResetTime(first.resetAt) ?? "unknown";
+  const secondReset = ownerResetTime(second.resetAt) ?? "unknown";
+  return `Codex A/B 帳號目前皆無可用額度，已建立 durable DS handoff，交由 DS 接續。${first.account} reset：${firstReset}；${second.account} reset：${secondReset}。`;
+}
+
+function ownerResetTime(resetAt: string | undefined): string | undefined {
+  if (resetAt === undefined) return undefined;
+  const date = new Date(resetAt);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const parts = new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}:${value("second")}`;
+}
+
 export class RegisteredWorkspaceTaskService {
   private readonly tasks = new Map<Id, TaskRecord>();
   private readonly pinnedTaskIds = new Set<Id>();
@@ -163,7 +344,8 @@ export class RegisteredWorkspaceTaskService {
     private readonly registry: RegisteredWorkspaceRegistry,
     private readonly executorFactory: ExecutorFactory,
     private readonly executionReceipts?: ExecutionReceiptStore,
-    private readonly observer?: TaskObserver
+    private readonly observer?: TaskObserver,
+    private readonly hostEnvironment: Readonly<NodeJS.ProcessEnv> = process.env
   ) {}
 
   runTask(
@@ -294,12 +476,26 @@ export class RegisteredWorkspaceTaskService {
       taskId,
       state: record.state,
       executor: record.request.executor,
+      ...(record.resolvedExecutor === undefined || record.resolvedExecutor === record.request.executor
+        ? {}
+        : { resolved_executor: record.resolvedExecutor }),
       ...(record.request.model === undefined ? {} : { model: record.request.model }),
       ...(record.request.reasoning === undefined ? {} : { reasoning: record.request.reasoning }),
       ...(record.request.reasoning_effort === undefined ? {} : { reasoning_effort: record.request.reasoning_effort }),
       ...(record.request.service_tier === undefined ? {} : { service_tier: record.request.service_tier }),
-      ...(record.request.account === undefined ? {} : { account: record.request.account }),
+      ...(record.resolvedExecutor === "dsh" || record.failover?.fallback_executor === "ds"
+        ? {}
+        : record.resolvedAccount === undefined && record.request.account === undefined
+        ? {}
+        : { account: record.resolvedAccount ?? record.request.account }),
+      ...(record.failover === undefined || record.request.account === undefined
+        ? {}
+        : { requested_account: record.request.account }),
+      ...(record.failover === undefined || record.resolvedAccount === undefined
+        ? {}
+        : { resolved_account: record.resolvedAccount }),
       ...(record.request.sandbox === undefined ? {} : { sandbox: record.request.sandbox }),
+      ...(record.failover === undefined ? {} : { failover: record.failover }),
       evidence: record.evidence,
       ...(record.threadId === undefined ? {} : { threadId: record.threadId }),
       ...(record.diagnostics === undefined ? {} : { diagnostics: record.diagnostics })
@@ -334,7 +530,7 @@ export class RegisteredWorkspaceTaskService {
   ): Promise<ControlledTaskView> {
     if (action === "accept") {
       if (record.state !== "waiting_for_supervisor_review") throw new CoreError("INVALID_STATE_TRANSITION");
-      await this.recordExecutionReceipt(taskId, record.request, "run_task", "completed");
+      await this.recordExecutionReceipt(taskId, record.request, "run_task", "completed", undefined, record);
       record.state = "completed";
       this.observeState(taskId, record.request.executor, "completed");
       this.interactiveTerminalTaskIds.push(taskId);
@@ -389,6 +585,157 @@ export class RegisteredWorkspaceTaskService {
   private readonly interactive = new Map<Id, InteractiveRecord>();
   private interactiveTerminalTaskIds: Id[] = [];
 
+  private failInteractive(taskId: Id, record: InteractiveRecord, error: SerializedError): void {
+    record.executor = undefined;
+    record.state = "failed";
+    record.error = error;
+    this.observeState(taskId, record.resolvedExecutor ?? record.request.executor, "failed");
+    this.recordInteractiveTerminalTask(taskId);
+  }
+
+  private routeAfterQuota(
+    taskId: Id,
+    record: InteractiveRecord,
+    currentAccount: string,
+    currentState: CodexAccountUsageState,
+    evidence: readonly ExecutorEvidence[],
+    checkpoint: "quota_preflight" | "runtime_failure",
+    workspaceMutationSafe = true
+  ): "retry" | "terminal" | "ds_handoff" {
+    const alternate = alternateCodexAccount(currentAccount, this.hostEnvironment);
+    if (alternate === undefined) {
+      this.failInteractive(taskId, record, quotaError(currentState));
+      return "terminal";
+    }
+    const alternateState = inspectCodexAccountUsage(alternate, this.hostEnvironment, { forceRefresh: true });
+    const priorRetryCount = record.failover?.retry_count ?? 0;
+
+    if (alternateState.availability === "quota_exhausted") {
+      if (checkpoint === "runtime_failure" && (!workspaceMutationSafe || hasMutationEvidence(evidence))) {
+        record.failover = {
+          attempted: false,
+          from_account: currentAccount,
+          reason: quotaReason(currentState),
+          quota_window: currentState.quotaWindow ?? "5h",
+          ...(currentState.resetAt === undefined ? {} : { reset_at: currentState.resetAt }),
+          fallback_executor: "ds",
+          retry_count: priorRetryCount,
+          continuation: continuationReceipt(taskId, "mutation_review_required", evidence, true),
+          owner_notice: `Codex A/B 帳號皆已耗盡，但先前已有 mutation evidence；已停止自動接續，等待 DS / supervisor 先核對 Repo checkpoint。`
+        };
+        this.observeFailover(taskId, record.failover);
+        this.failInteractive(taskId, record, serializeError(new CoreError("FAILOVER_REVIEW_REQUIRED")));
+        return "terminal";
+      }
+
+      record.resolvedExecutor = "codex";
+      record.resolvedAccount = undefined;
+      record.threadId = undefined;
+      record.executionInstruction = failoverInstruction(
+        record.request.instruction,
+        taskId,
+        currentAccount,
+        undefined,
+        quotaReason(currentState),
+        evidence,
+        "ds"
+      );
+      record.failover = {
+        attempted: true,
+        from_account: currentAccount,
+        reason: quotaReason(currentState),
+        quota_window: currentState.quotaWindow ?? "5h",
+        ...(currentState.resetAt === undefined ? {} : { reset_at: currentState.resetAt }),
+        fallback_executor: "ds",
+        retry_count: priorRetryCount,
+        continuation: continuationReceipt(
+          taskId,
+          checkpoint === "quota_preflight" ? "quota_preflight" : "no_mutation_evidence",
+          evidence
+        ),
+        owner_notice: ownerDsHandoffNotice(currentState, alternateState)
+      };
+      this.observeFailover(taskId, record.failover);
+      return "ds_handoff";
+    }
+
+    if (alternateState.availability !== "available") {
+      this.failInteractive(taskId, record, quotaError(currentState));
+      return "terminal";
+    }
+
+    // One account failover cycle per Bridge task. A replacement account that
+    // later exhausts quota must never bounce back A -> B -> A -> ... .
+    if (priorRetryCount >= 1) {
+      this.failInteractive(taskId, record, quotaError(currentState));
+      return "terminal";
+    }
+
+    if (checkpoint === "runtime_failure" && (!workspaceMutationSafe || hasMutationEvidence(evidence))) {
+      record.failover = {
+        attempted: false,
+        from_account: currentAccount,
+        to_account: alternate,
+        reason: quotaReason(currentState),
+        quota_window: currentState.quotaWindow ?? "5h",
+        ...(currentState.resetAt === undefined ? {} : { reset_at: currentState.resetAt }),
+        retry_count: 0,
+        continuation: continuationReceipt(taskId, "mutation_review_required", evidence, true),
+        owner_notice: `Account ${currentAccount} 額度耗盡，但先前已出現 mutation evidence；為避免重複寫入，已停止自動重跑並等待 supervisor review。`
+      };
+      this.observeFailover(taskId, record.failover);
+      this.failInteractive(taskId, record, serializeError(new CoreError("FAILOVER_REVIEW_REQUIRED")));
+      return "terminal";
+    }
+
+    record.resolvedExecutor = "codex";
+    record.resolvedAccount = alternate;
+    record.threadId = undefined;
+    record.executionInstruction = checkpoint === "quota_preflight"
+      ? record.request.instruction
+      : failoverInstruction(
+        record.request.instruction,
+        taskId,
+        currentAccount,
+        alternate,
+        quotaReason(currentState)!,
+        evidence
+      );
+    record.failover = {
+      attempted: true,
+      from_account: currentAccount,
+      to_account: alternate,
+      reason: quotaReason(currentState),
+      quota_window: currentState.quotaWindow ?? "5h",
+      ...(currentState.resetAt === undefined ? {} : { reset_at: currentState.resetAt }),
+      retry_count: priorRetryCount + 1,
+      continuation: continuationReceipt(
+        taskId,
+        checkpoint === "quota_preflight" ? "quota_preflight" : "no_mutation_evidence",
+        evidence
+      ),
+      owner_notice: ownerFailoverNotice(currentAccount, alternate, currentState, record.request)
+    };
+    this.observeFailover(taskId, record.failover);
+    return "retry";
+  }
+
+  private prepareInitialInteractiveRouting(
+    taskId: Id,
+    record: InteractiveRecord
+  ): "ready" | "terminal" | "ds_handoff" {
+    record.resolvedExecutor ??= record.request.executor;
+    if (record.request.executor !== "codex" || record.request.account === undefined) return "ready";
+    if (record.resolvedAccount !== undefined || record.failover !== undefined) return "ready";
+    const state = inspectCodexAccountUsage(record.request.account, this.hostEnvironment);
+    if (state.availability !== "quota_exhausted") {
+      record.resolvedAccount = record.request.account;
+      return "ready";
+    }
+    const route = this.routeAfterQuota(taskId, record, record.request.account, state, [], "quota_preflight");
+    return route === "retry" ? "ready" : route;
+  }
+
   private async executeInteractive(taskId: Id): Promise<void> {
     const record = this.interactive.get(taskId);
     if (!record) return;
@@ -396,55 +743,130 @@ export class RegisteredWorkspaceTaskService {
     this.observeState(taskId, record.request.executor, "running");
     try {
       const registration = this.registry.resolveExecution(record.request.workspace_id);
-      const executor = this.executorFactory(record.request.executor, registration.root);
-      record.executor = executor;
-      const instruction = attachKnowledgePreflightReceipt(record.request.instruction, record.request.preflight_receipt, {
-        workspaceId: record.request.workspace_id,
-        workspaceRoot: registration.root,
-        executor: record.request.executor,
-        sandbox: record.request.sandbox ?? "read-only"
-      });
-      const result = await executor.execute({ taskId, instruction,
-        sandbox: record.request.sandbox ?? "read-only",
-        ...(record.threadId !== undefined ? { threadId: record.threadId } : {}),
-        ...(record.request.model !== undefined ? { model: record.request.model } : {}),
-        ...(record.request.reasoning !== undefined ? { reasoning: record.request.reasoning } : {}),
-        ...(record.request.reasoning_effort !== undefined ? { reasoning_effort: record.request.reasoning_effort } : {}),
-        ...(record.request.service_tier !== undefined ? { service_tier: record.request.service_tier } : {}),
-        ...(record.request.account !== undefined ? { account: record.request.account } : {}),
-        ...(record.request.web_research === true ? { webSearch: "live" as const } : {}),
-        onEvidence: (items) => {
-          record.evidence = items;
-          this.observeEvidence(taskId, record.request.executor, items);
-        } });
-      record.executor = undefined;
-      record.threadId = result.threadId ?? record.threadId;
-      record.evidence = result.evidence ?? record.evidence;
-      if (result.threadId !== undefined) {
-        this.observeThread(taskId, record.request.executor, result.threadId);
+      const initialRoute = this.prepareInitialInteractiveRouting(taskId, record);
+      if (initialRoute === "terminal") return;
+      if (initialRoute === "ds_handoff") {
+        await this.recordExecutionReceipt(
+          taskId,
+          record.request,
+          "run_task",
+          "handoff_required",
+          registration.root,
+          record
+        );
+        this.failInteractive(
+          taskId,
+          record,
+          serializeError(new CoreError("BOTH_CODEX_ACCOUNTS_QUOTA_EXHAUSTED"))
+        );
+        return;
       }
-      if (result.evidence !== undefined) {
-        this.observeEvidence(taskId, record.request.executor, result.evidence);
-      }
-      if (result.kind === "failed") {
-        record.state = "failed";
-        record.error = result.error;
-        // Preserve only the bounded, content-free protocol metadata needed to
-        // diagnose Codex transport failures. Generic executor failures and
-        // interrupted tasks keep the previous no-diagnostics boundary.
-        if (result.error.code === "CODEX_PROTOCOL_ERROR" && result.diagnostics?.protocol !== undefined) {
-          record.diagnostics = result.diagnostics;
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const resolvedExecutor = record.resolvedExecutor ?? record.request.executor;
+        const resolvedAccount = record.resolvedAccount ?? record.request.account;
+        const executor = this.executorFactory(resolvedExecutor, registration.root);
+        record.executor = executor;
+        const effectiveSandbox = resolvedExecutor === "dsh" ? "read-only" : record.request.sandbox ?? "read-only";
+        const mutationBefore = captureWorkspaceMutationCheckpoint(registration.root);
+        const instruction = attachKnowledgePreflightReceipt(
+          record.executionInstruction ?? record.request.instruction,
+          record.request.preflight_receipt,
+          {
+            workspaceId: record.request.workspace_id,
+            workspaceRoot: registration.root,
+            executor: resolvedExecutor,
+            sandbox: effectiveSandbox
+          }
+        );
+        const result = await executor.execute({
+          taskId,
+          instruction,
+          sandbox: effectiveSandbox,
+          ...(resolvedExecutor === "codex" && record.threadId !== undefined ? { threadId: record.threadId } : {}),
+          ...(resolvedExecutor === "codex" && record.request.model !== undefined ? { model: record.request.model } : {}),
+          ...(resolvedExecutor === "codex" && record.request.reasoning !== undefined ? { reasoning: record.request.reasoning } : {}),
+          ...(resolvedExecutor === "codex" && record.request.reasoning_effort !== undefined ? { reasoning_effort: record.request.reasoning_effort } : {}),
+          ...(resolvedExecutor === "codex" && record.request.service_tier !== undefined ? { service_tier: record.request.service_tier } : {}),
+          ...(resolvedExecutor === "codex" && resolvedAccount !== undefined ? { account: resolvedAccount } : {}),
+          ...(resolvedExecutor === "codex" && record.request.web_research === true ? { webSearch: "live" as const } : {}),
+          onEvidence: (items) => {
+            record.evidence = items;
+            this.observeEvidence(taskId, resolvedExecutor, items);
+          }
+        });
+        record.executor = undefined;
+        if (resolvedExecutor === "codex") {
+          record.threadId = result.threadId ?? record.threadId;
         }
-      }
-      else if (result.kind === "interrupted") {
-        // The failed terminal state and its safe error are unchanged; the
-        // executor's genuine partial output is retained separately and never
-        // treated as completed review output.
-        record.partialOutput = result.output;
-        record.output = undefined;
-        record.state = "failed";
-        record.error = interruptedError();
-      } else {
+        record.evidence = result.evidence ?? record.evidence;
+        if (result.threadId !== undefined) {
+          this.observeThread(taskId, resolvedExecutor, result.threadId);
+        }
+        if (result.evidence !== undefined) {
+          this.observeEvidence(taskId, resolvedExecutor, result.evidence);
+        }
+
+        if (result.kind === "failed") {
+          if (resolvedExecutor === "codex" && resolvedAccount !== undefined &&
+              result.error.code !== "CODEX_PROTOCOL_ERROR" &&
+              result.error.code !== "MODEL_CAPACITY" &&
+              result.error.code !== "ACCOUNT_AUTH_INVALID" &&
+              result.error.code !== "ACCOUNT_PROFILE_UNAVAILABLE" &&
+              result.error.code !== "PROCESS_SPAWN_FAILURE" &&
+              result.error.code !== "NETWORK_RPC_FAILURE") {
+            const usage = inspectCodexAccountUsage(resolvedAccount, this.hostEnvironment, { forceRefresh: true });
+            if (usage.availability === "quota_exhausted") {
+              const mutationAfter = captureWorkspaceMutationCheckpoint(registration.root);
+              const routed = this.routeAfterQuota(
+                taskId,
+                record,
+                resolvedAccount,
+                usage,
+                result.evidence ?? record.evidence,
+                "runtime_failure",
+                workspaceMutationIsSafe(mutationBefore, mutationAfter, effectiveSandbox)
+              );
+              if (routed === "retry") continue;
+              if (routed === "ds_handoff") {
+                await this.recordExecutionReceipt(
+                  taskId,
+                  record.request,
+                  "run_task",
+                  "handoff_required",
+                  registration.root,
+                  record
+                );
+                this.failInteractive(
+                  taskId,
+                  record,
+                  serializeError(new CoreError("BOTH_CODEX_ACCOUNTS_QUOTA_EXHAUSTED"))
+                );
+              }
+              return;
+            }
+          }
+
+          record.state = "failed";
+          record.error = result.error;
+          if (result.error.code === "CODEX_PROTOCOL_ERROR" && result.diagnostics?.protocol !== undefined) {
+            record.diagnostics = result.diagnostics;
+          }
+          this.observeState(taskId, resolvedExecutor, "failed");
+          this.recordInteractiveTerminalTask(taskId);
+          return;
+        }
+
+        if (result.kind === "interrupted") {
+          record.partialOutput = result.output;
+          record.output = undefined;
+          record.state = "failed";
+          record.error = interruptedError();
+          this.observeState(taskId, resolvedExecutor, "failed");
+          this.recordInteractiveTerminalTask(taskId);
+          return;
+        }
+
         record.diagnostics = result.diagnostics;
         record.output = result.output;
         await this.recordExecutionReceipt(
@@ -452,18 +874,17 @@ export class RegisteredWorkspaceTaskService {
           record.request,
           "run_task",
           "waiting_for_supervisor_review",
-          registration.root
+          registration.root,
+          record
         );
         record.state = "waiting_for_supervisor_review";
+        this.observeState(taskId, resolvedExecutor, record.state);
+        return;
       }
-      this.observeState(taskId, record.request.executor, record.state);
-      if (record.state === "failed") this.recordInteractiveTerminalTask(taskId);
+
+      this.failInteractive(taskId, record, serializeError(new CoreError("UNKNOWN_EXECUTOR_FAILURE")));
     } catch (error) {
-      record.executor = undefined;
-      record.state = "failed";
-      record.error = serializeError(error);
-      this.observeState(taskId, record.request.executor, "failed");
-      this.recordInteractiveTerminalTask(taskId);
+      this.failInteractive(taskId, record, serializeError(error));
     }
   }
 
@@ -614,12 +1035,30 @@ export class RegisteredWorkspaceTaskService {
     }
   }
 
+  private observeFailover(taskId: Id, failover: FailoverProvenance): void {
+    try {
+      this.observer?.failover?.(taskId, {
+        attempted: failover.attempted,
+        ...(failover.from_account === undefined ? {} : { fromAccount: failover.from_account }),
+        ...(failover.to_account === undefined ? {} : { toAccount: failover.to_account }),
+        ...(failover.reason === undefined ? {} : { reason: failover.reason }),
+        ...(failover.quota_window === undefined ? {} : { quotaWindow: failover.quota_window }),
+        ...(failover.reset_at === undefined ? {} : { resetAt: failover.reset_at }),
+        ...(failover.fallback_executor === undefined ? {} : { fallbackExecutor: failover.fallback_executor }),
+        retryCount: failover.retry_count
+      });
+    } catch {
+      // Observation is best effort and cannot affect task control.
+    }
+  }
+
   private async recordExecutionReceipt(
     taskId: Id,
     request: NormalizedRegisteredWorkspaceTaskRequest,
     operation: ExecutionReceiptOperation,
-    state: "waiting_for_supervisor_review" | "completed",
-    knownWorkspaceRoot?: string
+    state: "waiting_for_supervisor_review" | "completed" | "handoff_required",
+    knownWorkspaceRoot?: string,
+    interactiveRecord?: InteractiveRecord
   ): Promise<void> {
     if (request.executor !== "codex" || this.executionReceipts === undefined) return;
     const workspaceRoot = knownWorkspaceRoot ?? this.registry.resolve(request.workspace_id);
@@ -634,6 +1073,48 @@ export class RegisteredWorkspaceTaskService {
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(request.service_tier === undefined ? {} : { serviceTier: request.service_tier }),
       ...(request.account === undefined ? {} : { account: request.account }),
+      ...(interactiveRecord?.failover === undefined || request.account === undefined
+        ? {}
+        : { requestedAccount: request.account }),
+      ...(interactiveRecord?.failover === undefined || interactiveRecord.resolvedExecutor === "dsh" ||
+          interactiveRecord.failover.fallback_executor === "ds" ||
+          (interactiveRecord.resolvedAccount ?? request.account) === undefined
+        ? {}
+        : { resolvedAccount: interactiveRecord?.resolvedAccount ?? request.account }),
+      ...(interactiveRecord?.failover === undefined || interactiveRecord.resolvedExecutor === undefined ||
+          interactiveRecord.resolvedExecutor === request.executor
+        ? {}
+        : { resolvedExecutor: interactiveRecord.resolvedExecutor }),
+      ...(interactiveRecord?.failover === undefined ? {} : {
+        failover: {
+          attempted: interactiveRecord.failover.attempted,
+          ...(interactiveRecord.failover.from_account === undefined
+            ? {}
+            : { fromAccount: interactiveRecord.failover.from_account }),
+          ...(interactiveRecord.failover.to_account === undefined
+            ? {}
+            : { toAccount: interactiveRecord.failover.to_account }),
+          ...(interactiveRecord.failover.reason === undefined
+            ? {}
+            : { reason: interactiveRecord.failover.reason }),
+          ...(interactiveRecord.failover.quota_window === undefined
+            ? {}
+            : { quotaWindow: interactiveRecord.failover.quota_window }),
+          ...(interactiveRecord.failover.reset_at === undefined
+            ? {}
+            : { resetAt: interactiveRecord.failover.reset_at }),
+          ...(interactiveRecord.failover.fallback_executor === undefined
+            ? {}
+            : { fallbackExecutor: interactiveRecord.failover.fallback_executor }),
+          retryCount: interactiveRecord.failover.retry_count,
+          checkpoint: interactiveRecord.failover.continuation.checkpoint,
+          evidenceCount: interactiveRecord.failover.continuation.evidence_count,
+          mutationEvidence: interactiveRecord.failover.continuation.mutation_evidence,
+          ...(interactiveRecord.failover.owner_notice === undefined
+            ? {}
+            : { ownerNotice: interactiveRecord.failover.owner_notice })
+        }
+      }),
       operation,
       sandbox,
       readOnly: sandbox === "read-only",

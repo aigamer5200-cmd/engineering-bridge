@@ -2,6 +2,55 @@
 
 Date: 2026-09-12
 
+## `.6` account runtime failover candidate checkpoint
+
+The `.5` quota guard has now been extended in source to the Owner-requested
+bounded A/B runtime failover controller. This checkpoint is still on the repair
+branch and is **not yet Production** at the time of this section.
+
+Implemented source behavior:
+
+```text
+5h quota detection: PASS
+weekly quota detection: PASS
+stale cache refresh/recheck: PASS
+stale refresh failure -> unknown / no automatic failover: PASS
+expired quota auto-recovery: PASS
+A 5h/weekly exhausted -> B: PASS
+B 5h/weekly exhausted -> A: PASS
+automatic account failover restricted to A<->B: PASS
+same model/reasoning/service-tier/sandbox: PASS
+native thread not reused across accounts: PASS
+protocol/model-capacity/generic error no blind failover: PASS
+mid-task mutation evidence guard: PASS
+bounded Git HEAD/clean checkpoint guard: PASS
+one account failover cycle max: PASS
+both exhausted -> durable DS handoff: PASS
+credential-safe receipt/observer provenance: PASS
+```
+
+Safety clarification: Bridge's built-in DSH executor is read-only and is not
+DevSpace (DS). Therefore a task with both Codex accounts exhausted must not
+pretend that DSH is the requested DS fallback. The source emits
+`BOTH_CODEX_ACCOUNTS_QUOTA_EXHAUSTED` plus a durable `handoff_required` receipt
+with `fallback_executor=ds`; the upper GOAL/DS orchestration layer can then
+continue from that checkpoint. DSH remains available only when the caller
+explicitly chooses the existing read-only DSH executor.
+
+Validation at this source checkpoint:
+
+```text
+npm run typecheck: PASS
+targeted failover/classifier/receipt/observer suites: PASS
+full suite: 413 total / 408 PASS / 0 FAIL / 5 platform skips
+target package version: 1.4.2-biaogu.6
+Production switch: pending immutable Canary acceptance
+rollback runtime: 1.4.2-biaogu.5
+```
+
+No credential, token, auth-file payload, API key, email address, or raw provider
+response is stored by the new failover provenance.
+
 ## Frozen objective
 
 Repair false `CODEX_PROTOCOL_ERROR / Codex returned an invalid response`

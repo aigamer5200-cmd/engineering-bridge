@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import { CoreError, serializeError } from "../core/errors.js";
+import type { ErrorCode } from "../core/errors.js";
 import { VERSION } from "../version.js";
 import { resolveCommand } from "./command-resolution.js";
 import { resolveCodexAccountLaunch } from "./codex-account-router.js";
@@ -38,21 +39,35 @@ const CODEX_NODE_TARGET = ["@openai", "codex", "bin", "codex.js"] as const;
 // entries that make list and count truncation visible.
 const TRUNCATION_MARKER = "[truncated]";
 
-function failure(code: "CODEX_UNAVAILABLE" | "CODEX_ACCOUNT_UNAVAILABLE" | "CODEX_ACCOUNT_QUOTA_EXHAUSTED" | "CODEX_PROTOCOL_ERROR" | "CODEX_EXECUTION_FAILED" | "EXECUTOR_STALLED"): ExecutorResult {
+function failure(code: ErrorCode): ExecutorResult {
   return { kind: "failed", error: serializeError(new CoreError(code)) };
 }
-function failedTurn(turn: Record<string, unknown>): ExecutorResult {
-  const error = object(turn.error) ? turn.error : undefined;
-  if (error?.codexErrorInfo === "serverOverloaded") {
-    return {
-      kind: "failed",
-      error: {
-        code: "CODEX_EXECUTION_FAILED",
-        message: "Codex execution failed: the selected model is at capacity."
-      }
-    };
+function classifiedStructuredError(error: unknown): ErrorCode | undefined {
+  if (!object(error)) return undefined;
+  const data = object(error.data) ? error.data : undefined;
+  const infoValue = typeof error.codexErrorInfo === "string"
+    ? error.codexErrorInfo
+    : typeof data?.codexErrorInfo === "string"
+      ? data.codexErrorInfo
+      : "";
+  const codeValue = typeof error.code === "string"
+    ? error.code
+    : typeof data?.code === "string"
+      ? data.code
+      : "";
+  const info = infoValue.toLowerCase();
+  const code = codeValue.toLowerCase();
+  if (info === "serveroverloaded" || code.includes("model_capacity")) return "MODEL_CAPACITY";
+  if (info.includes("auth") || code.includes("auth") || code.includes("unauthorized")) return "ACCOUNT_AUTH_INVALID";
+  if (info.includes("profile") || code.includes("profile_unavailable")) return "ACCOUNT_PROFILE_UNAVAILABLE";
+  if (info.includes("rate") || code.includes("rate_limit")) return "PROVIDER_RATE_LIMIT";
+  if (info.includes("overload") || info.includes("temporar") || code.includes("temporar") || code.includes("unavailable")) {
+    return "PROVIDER_TRANSIENT";
   }
-  return failure("CODEX_EXECUTION_FAILED");
+  return undefined;
+}
+function failedTurn(turn: Record<string, unknown>): ExecutorResult {
+  return failure(classifiedStructuredError(turn.error) ?? "CODEX_EXECUTION_FAILED");
 }
 function environment(host: Readonly<NodeJS.ProcessEnv>): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
@@ -97,7 +112,7 @@ export class CodexExecutor implements Executor {
   private nextId = 1;
   private pending = new Map<number, {
     resolve: (value: unknown) => void;
-    reject: () => void;
+    reject: (reason?: unknown) => void;
     timer: NodeJS.Timeout;
   }>();
   private beginInterrupt: (() => void) | undefined;
@@ -187,13 +202,10 @@ export class CodexExecutor implements Executor {
       }
       this.child = child;
     } catch (error) {
-      if (request.account !== undefined) {
-        return withDiagnostics({
-          kind: "failed",
-          error: serializeError(error instanceof CoreError ? error : new CoreError("CODEX_ACCOUNT_UNAVAILABLE"))
-        });
+      if (error instanceof CoreError) {
+        return withDiagnostics({ kind: "failed", error: serializeError(error) });
       }
-      return withDiagnostics(failure("CODEX_UNAVAILABLE"));
+      return withDiagnostics(failure("PROCESS_SPAWN_FAILURE"));
     }
 
     const evidence = new Map<string, ExecutorEvidence>();
@@ -269,7 +281,8 @@ export class CodexExecutor implements Executor {
       killSignalled = true;
       finish(result);
     };
-    const unavailable = (): void => stop(failure(accountRouted ? "CODEX_ACCOUNT_UNAVAILABLE" : "CODEX_UNAVAILABLE"));
+    const processFailure = (): void => stop(failure("PROCESS_SPAWN_FAILURE"));
+    const rpcFailure = (): void => stop(failure("NETWORK_RPC_FAILURE"));
     // The evidence view a supervisor receives. Real evidence and the synthetic
     // evidence-drop marker together never exceed MAX_EVIDENCE: the marker only
     // appears once real entries were evicted, and the eviction loop above
@@ -360,10 +373,10 @@ export class CodexExecutor implements Executor {
       () => beginTermination(failure("CODEX_EXECUTION_FAILED"), 0),
       this.timing.executionTimeoutMs
     );
-    child.on("error", unavailable);
-    child.stdin.on("error", unavailable);
-    child.stdout.on("error", unavailable);
-    child.stderr.on("error", unavailable);
+    child.on("error", processFailure);
+    child.stdin.on("error", rpcFailure);
+    child.stdout.on("error", rpcFailure);
+    child.stderr.on("error", rpcFailure);
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       protocolStderrBytes += Buffer.byteLength(chunk, "utf8");
@@ -395,7 +408,12 @@ export class CodexExecutor implements Executor {
           if (waiter) {
             this.pending.delete(message.id);
             clearTimeout(waiter.timer);
-            "error" in message ? waiter.reject() : waiter.resolve(message.result);
+            if ("error" in message) {
+              const code = classifiedStructuredError(message.error) ?? "CODEX_EXECUTION_FAILED";
+              waiter.reject(new CoreError(code));
+            } else {
+              waiter.resolve(message.result);
+            }
           }
           continue;
         }
@@ -565,7 +583,7 @@ export class CodexExecutor implements Executor {
       this.turnId = turnResult.turn.id;
       if (this.startedTurnId !== this.turnId) this.startedTurnId = undefined;
     } catch (error) {
-      if (!settled) finish(error instanceof CoreError && error.code === "UNSUPPORTED_ACTION"
+      if (!settled) finish(error instanceof CoreError
         ? { kind: "failed", error: serializeError(error) }
         : protocolFailure("rpc_or_handshake"));
     }
@@ -584,7 +602,7 @@ export class CodexExecutor implements Executor {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (!this.child || this.child.stdin.destroyed) { reject(); return; }
-      const rejectWaiter = (): void => reject(new Error());
+      const rejectWaiter = (reason?: unknown): void => reject(reason ?? new Error());
       const timer = setTimeout(() => {
         const waiter = this.pending.get(id);
         if (!waiter) return;

@@ -436,7 +436,7 @@ test("explicit Codex account reports an active cached quota exhaustion before la
   const result = await executor.execute({ taskId: TASK_ID, instruction: "use B", account: "B" });
 
   assert.equal(result.kind, "failed");
-  if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_QUOTA_EXHAUSTED");
+  if (result.kind === "failed") assert.equal(result.error.code, "ACCOUNT_5H_QUOTA_EXHAUSTED");
   assert.equal(invocations.length, 0);
 });
 
@@ -834,7 +834,7 @@ test("normal Codex completion clears lifecycle work and ignores late process or 
     error instanceof CoreError && error.code === "INVALID_STATE_TRANSITION");
 });
 
-test("maps a thrown spawn and a process error to unavailable", async () => {
+test("maps a thrown spawn and a process error to process/spawn failure", async () => {
   const throwing: ProcessStarter = () => { throw new Error("secret spawn details"); };
   const thrown = await new CodexExecutor(TRUSTED_CWD, throwing, {}).execute({ taskId: TASK_ID, instruction: "x" });
   const emitted = await new CodexExecutor(TRUSTED_CWD, fakeStarter({ processError: true }, []), {})
@@ -843,7 +843,7 @@ test("maps a thrown spawn and a process error to unavailable", async () => {
   for (const result of [thrown, emitted]) {
     assert.deepEqual(withoutDiagnostics(result), {
       kind: "failed",
-      error: { code: "CODEX_UNAVAILABLE", message: "Codex is unavailable." }
+      error: { code: "PROCESS_SPAWN_FAILURE", message: "The Codex process could not be started." }
     });
   }
 });
@@ -913,8 +913,8 @@ test("reports an allowlisted failed-turn reason without exposing raw error detai
   assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
     error: {
-      code: "CODEX_EXECUTION_FAILED",
-      message: "Codex execution failed: the selected model is at capacity."
+      code: "MODEL_CAPACITY",
+      message: "The selected Codex model is at capacity."
     },
     threadId: "thread-1",
     evidence: []
@@ -923,6 +923,30 @@ test("reports an allowlisted failed-turn reason without exposing raw error detai
   assert.equal(serialized.includes("secret upstream message"), false);
   assert.equal(serialized.includes("/private/path"), false);
   assert.equal(serialized.includes("secret diagnostics"), false);
+});
+
+test("classifies structured failed-turn auth, rate-limit, and transient errors without exposing provider detail", async () => {
+  for (const [codexErrorInfo, expectedCode] of [
+    ["authenticationFailed", "ACCOUNT_AUTH_INVALID"],
+    ["rateLimitReached", "PROVIDER_RATE_LIMIT"],
+    ["temporarilyUnavailable", "PROVIDER_TRANSIENT"]
+  ] as const) {
+    const result = await new CodexExecutor(TRUSTED_CWD, fakeStarter({
+      appServerOutput: "",
+      turnError: {
+        message: "SECRET_PROVIDER_DETAIL /private/path",
+        codexErrorInfo,
+        additionalDetails: "SECRET_PROVIDER_DIAGNOSTICS"
+      }
+    }, []), {}).execute({ taskId: TASK_ID, instruction: "x" });
+
+    assert.equal(result.kind, "failed");
+    if (result.kind === "failed") assert.equal(result.error.code, expectedCode);
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes("SECRET_PROVIDER_DETAIL"), false);
+    assert.equal(serialized.includes("SECRET_PROVIDER_DIAGNOSTICS"), false);
+    assert.equal(serialized.includes("/private/path"), false);
+  }
 });
 
 test("an interrupted turn keeps the last completed agent text as real partial output", async () => {
@@ -1435,7 +1459,7 @@ test("POSIX: a Windows-style codex.exe layout on PATH does not change the bare s
   assert.deepEqual(invocation.args, ["app-server", "--stdio"]);
 });
 
-test("win32: a spawned command that does not resolve still maps to CODEX_UNAVAILABLE", async () => {
+test("win32: a spawned command that does not resolve maps to process/spawn failure", async () => {
   const dir = windowsDirectory();
   const executor = new CodexExecutor(TRUSTED_CWD,
     fakeStarter({ processError: true }, []),
@@ -1445,6 +1469,6 @@ test("win32: a spawned command that does not resolve still maps to CODEX_UNAVAIL
 
   assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
-    error: { code: "CODEX_UNAVAILABLE", message: "Codex is unavailable." }
+    error: { code: "PROCESS_SPAWN_FAILURE", message: "The Codex process could not be started." }
   });
 });

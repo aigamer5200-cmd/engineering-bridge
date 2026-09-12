@@ -5,12 +5,27 @@ import { isId } from "../core/ids.js";
 import type { Id } from "../core/ids.js";
 import type { ReasoningEffort, SandboxMode, ServiceTier } from "../executors/executor.js";
 
+export interface ExecutionReceiptFailover {
+  readonly attempted: boolean;
+  readonly fromAccount?: string;
+  readonly toAccount?: string;
+  readonly reason?: "ACCOUNT_5H_QUOTA_EXHAUSTED" | "ACCOUNT_WEEKLY_QUOTA_EXHAUSTED";
+  readonly quotaWindow?: "5h" | "weekly";
+  readonly resetAt?: string;
+  readonly fallbackExecutor?: "dsh" | "ds";
+  readonly retryCount: number;
+  readonly checkpoint: "no_mutation_evidence" | "mutation_review_required" | "quota_preflight";
+  readonly evidenceCount: number;
+  readonly mutationEvidence: boolean;
+  readonly ownerNotice?: string;
+}
+
 export type ExecutionReceiptOperation =
   | "run_task"
   | "generate_controlled_patch"
   | "refine_controlled_patch";
 
-export type ExecutionReceiptState = "waiting_for_supervisor_review" | "completed";
+export type ExecutionReceiptState = "waiting_for_supervisor_review" | "completed" | "handoff_required";
 
 export interface ExecutionReceiptRecord {
   readonly taskId: Id;
@@ -21,6 +36,10 @@ export interface ExecutionReceiptRecord {
   readonly reasoning?: ReasoningEffort;
   readonly serviceTier?: ServiceTier;
   readonly account?: string;
+  readonly requestedAccount?: string;
+  readonly resolvedAccount?: string;
+  readonly resolvedExecutor?: "codex" | "dsh";
+  readonly failover?: ExecutionReceiptFailover;
   readonly operation: ExecutionReceiptOperation;
   readonly sandbox: SandboxMode;
   readonly readOnly: boolean;
@@ -28,7 +47,7 @@ export interface ExecutionReceiptRecord {
   readonly recordedAt: string;
 }
 
-const EXECUTION_RECEIPTS_VERSION = 1;
+const EXECUTION_RECEIPTS_VERSION = 2;
 const MAX_EXECUTION_RECEIPTS = 500;
 
 /**
@@ -63,7 +82,7 @@ export class ExecutionReceiptStore {
     } catch {
       throw new CoreError("INTERNAL_ERROR");
     }
-    if (!isObject(value) || value.version !== EXECUTION_RECEIPTS_VERSION ||
+    if (!isObject(value) || (value.version !== 1 && value.version !== EXECUTION_RECEIPTS_VERSION) ||
         !Array.isArray(value.receipts)) {
       throw new CoreError("INTERNAL_ERROR");
     }
@@ -94,6 +113,10 @@ export class ExecutionReceiptStore {
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
         ...(input.serviceTier === undefined ? {} : { serviceTier: input.serviceTier }),
         ...(input.account === undefined ? {} : { account: input.account }),
+        ...(input.requestedAccount === undefined ? {} : { requestedAccount: input.requestedAccount }),
+        ...(input.resolvedAccount === undefined ? {} : { resolvedAccount: input.resolvedAccount }),
+        ...(input.resolvedExecutor === undefined ? {} : { resolvedExecutor: input.resolvedExecutor }),
+        ...(input.failover === undefined ? {} : { failover: input.failover }),
         operation: input.operation,
         sandbox: input.sandbox,
         readOnly: input.readOnly,
@@ -158,6 +181,25 @@ export class ExecutionReceiptStore {
         ...(record.reasoning === undefined ? {} : { reasoning: record.reasoning }),
         ...(record.serviceTier === undefined ? {} : { service_tier: record.serviceTier }),
         ...(record.account === undefined ? {} : { account: record.account }),
+        ...(record.requestedAccount === undefined ? {} : { requested_account: record.requestedAccount }),
+        ...(record.resolvedAccount === undefined ? {} : { resolved_account: record.resolvedAccount }),
+        ...(record.resolvedExecutor === undefined ? {} : { resolved_executor: record.resolvedExecutor }),
+        ...(record.failover === undefined ? {} : {
+          failover: {
+            attempted: record.failover.attempted,
+            ...(record.failover.fromAccount === undefined ? {} : { from_account: record.failover.fromAccount }),
+            ...(record.failover.toAccount === undefined ? {} : { to_account: record.failover.toAccount }),
+            ...(record.failover.reason === undefined ? {} : { reason: record.failover.reason }),
+            ...(record.failover.quotaWindow === undefined ? {} : { quota_window: record.failover.quotaWindow }),
+            ...(record.failover.resetAt === undefined ? {} : { reset_at: record.failover.resetAt }),
+            ...(record.failover.fallbackExecutor === undefined ? {} : { fallback_executor: record.failover.fallbackExecutor }),
+            retry_count: record.failover.retryCount,
+            checkpoint: record.failover.checkpoint,
+            evidence_count: record.failover.evidenceCount,
+            mutation_evidence: record.failover.mutationEvidence,
+            ...(record.failover.ownerNotice === undefined ? {} : { owner_notice: record.failover.ownerNotice })
+          }
+        }),
         operation: record.operation,
         sandbox: record.sandbox,
         read_only: record.readOnly,
@@ -206,6 +248,16 @@ function parseRecord(item: unknown): ExecutionReceiptRecord | undefined {
     ...(isReasoningEffort(item.reasoning) ? { reasoning: item.reasoning } : {}),
     ...(isServiceTier(item.service_tier) ? { serviceTier: item.service_tier } : {}),
     ...(typeof item.account === "string" && item.account.length > 0 ? { account: item.account } : {}),
+    ...(typeof item.requested_account === "string" && item.requested_account.length > 0
+      ? { requestedAccount: item.requested_account }
+      : {}),
+    ...(typeof item.resolved_account === "string" && item.resolved_account.length > 0
+      ? { resolvedAccount: item.resolved_account }
+      : {}),
+    ...(item.resolved_executor === "codex" || item.resolved_executor === "dsh"
+      ? { resolvedExecutor: item.resolved_executor }
+      : {}),
+    ...(parseFailover(item.failover) === undefined ? {} : { failover: parseFailover(item.failover)! }),
     operation: item.operation,
     sandbox: isSandboxMode(item.sandbox)
       ? item.sandbox
@@ -225,7 +277,7 @@ function isOperation(value: unknown): value is ExecutionReceiptOperation {
 }
 
 function isState(value: unknown): value is ExecutionReceiptState {
-  return value === "waiting_for_supervisor_review" || value === "completed";
+  return value === "waiting_for_supervisor_review" || value === "completed" || value === "handoff_required";
 }
 
 function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boolean {
@@ -237,6 +289,10 @@ function sameIdentity(a: ExecutionReceiptRecord, b: ExecutionReceiptRecord): boo
     a.reasoning === b.reasoning &&
     a.serviceTier === b.serviceTier &&
     a.account === b.account &&
+    a.requestedAccount === b.requestedAccount &&
+    a.resolvedAccount === b.resolvedAccount &&
+    a.resolvedExecutor === b.resolvedExecutor &&
+    JSON.stringify(a.failover) === JSON.stringify(b.failover) &&
     a.operation === b.operation &&
     a.sandbox === b.sandbox &&
     a.readOnly === b.readOnly;
@@ -257,4 +313,40 @@ function isReasoningEffort(value: unknown): value is ReasoningEffort {
 
 function isServiceTier(value: unknown): value is ServiceTier {
   return value === "standard" || value === "priority";
+}
+
+function parseFailover(value: unknown): ExecutionReceiptFailover | undefined {
+  if (!isObject(value) || typeof value.attempted !== "boolean" ||
+      !Number.isSafeInteger(value.retry_count) || Number(value.retry_count) < 0 ||
+      !isFailoverCheckpoint(value.checkpoint) ||
+      !Number.isSafeInteger(value.evidence_count) || Number(value.evidence_count) < 0 ||
+      typeof value.mutation_evidence !== "boolean") {
+    return undefined;
+  }
+  const reason = value.reason === "ACCOUNT_5H_QUOTA_EXHAUSTED" || value.reason === "ACCOUNT_WEEKLY_QUOTA_EXHAUSTED"
+    ? value.reason
+    : undefined;
+  const quotaWindow = value.quota_window === "5h" || value.quota_window === "weekly"
+    ? value.quota_window
+    : undefined;
+  return {
+    attempted: value.attempted,
+    ...(typeof value.from_account === "string" && value.from_account.length > 0 ? { fromAccount: value.from_account } : {}),
+    ...(typeof value.to_account === "string" && value.to_account.length > 0 ? { toAccount: value.to_account } : {}),
+    ...(reason === undefined ? {} : { reason }),
+    ...(quotaWindow === undefined ? {} : { quotaWindow }),
+    ...(typeof value.reset_at === "string" && value.reset_at.length > 0 ? { resetAt: value.reset_at } : {}),
+    ...(value.fallback_executor === "dsh" || value.fallback_executor === "ds"
+      ? { fallbackExecutor: value.fallback_executor }
+      : {}),
+    retryCount: Number(value.retry_count),
+    checkpoint: value.checkpoint,
+    evidenceCount: Number(value.evidence_count),
+    mutationEvidence: value.mutation_evidence,
+    ...(typeof value.owner_notice === "string" && value.owner_notice.length > 0 ? { ownerNotice: value.owner_notice } : {})
+  };
+}
+
+function isFailoverCheckpoint(value: unknown): value is ExecutionReceiptFailover["checkpoint"] {
+  return value === "no_mutation_evidence" || value === "mutation_review_required" || value === "quota_preflight";
 }

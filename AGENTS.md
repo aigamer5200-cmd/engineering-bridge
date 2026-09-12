@@ -67,6 +67,29 @@ Current first slice 只接受 explicit alias（例如 A/B）。Alias 必須通�
 allowlist；指定 account 才載入 optional `xjoker/codex-switch` adapter。`AUTO` 目前
 fail-closed，不得靜默挑選一個無法在 dispatch/receipt 證明的 account。
 
+### 2026-09-12 explicit A/B quota failover governance
+
+- `AUTO` 仍維持 fail-closed；本規則不是 unspecified-account 自動選號。
+- caller 明確指定 `account=A|B` 時，Bridge 可先讀取 `codex-switch` 的非敏感 usage
+  cache，並在 cache stale 時做 bounded refresh。只允許讀取 quota/usage/reset 等非敏感
+  狀態；不得讀取或持久化 auth token、email、API key、raw provider response。
+- 只有確認為 5-hour 或 weekly quota exhaustion，才允許在 A/B 間做一次 account
+  failover；generic execution failure、protocol error、model capacity、auth/profile、network
+  或 unknown failure 都不得盲目換 account。
+- account failover 必須完整保留 caller pin 的 model / reasoning / service_tier / sandbox /
+  workspace / web research / Knowledge Preflight boundary，不得降級 execution quality。
+- 新 account 必須建立新的 native Codex thread；不得跨 account resume 舊 thread。
+- preflight failover 可直接切 account。已開始執行的 write-capable task 只有在 bounded Git
+  checkpoint 能證明執行前後 HEAD 不變且 worktree 都乾淨、同時沒有 mutation evidence
+  時才可自動換 account；否則必須 `FAILOVER_REVIEW_REQUIRED`，避免重複 mutation。
+- 同一 task 最多一個 A -> B 或 B -> A cycle，禁止 account ping-pong loop。
+- A/B 都耗盡時，不得把 DSH 當成 DS；Bridge 必須產生 durable `handoff_required`
+  receipt，標記 `fallback_executor=ds` 與 `BOTH_CODEX_ACCOUNTS_QUOTA_EXHAUSTED`，交由上層
+  DS 接續。DSH 只保留給 caller 明確指定的既有 read-only DSH 任務。
+- `task_result` / execution receipt / observer 只能保存 bounded failover provenance：requested /
+  resolved alias、quota window、reset time、reason、retry count、fallback executor 與 mutation
+  checkpoint；不得保存 credential material。
+
 ## Codex routing default / caller override boundary
 
 - Engineering Bridge 的 machine-global Codex default 由 repo 外 runtime profile 管理；Owner

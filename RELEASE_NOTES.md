@@ -1,5 +1,64 @@
 # Release notes
 
+## v1.4.2-biaogu.6
+
+This release upgrades the `.5` single-account quota guard into a bounded
+runtime failover controller for explicit A/B Codex tasks while preserving the
+accepted `.4` transport repair and exact execution-profile routing.
+
+### Usage and failure classification
+
+- The non-secret `codex-switch` cache now distinguishes both the primary
+  five-hour window and the secondary weekly window, including reset times.
+- Stale cache state is boundedly refreshed through `codex-switch --json list`;
+  command output is discarded and is never copied into Bridge logs or task
+  artifacts.
+- If a stale cache cannot be refreshed, the usage state becomes `unknown` and
+  cannot drive automatic failover from stale quota evidence.
+- Structured app-server failures are classified before generic process text:
+  account auth/profile, model capacity, provider rate limit/transient,
+  protocol, process spawn, RPC transport, stalled, interrupted, generic, and
+  unknown failure lanes remain distinct.
+- Generic provider or protocol failures are not inferred to be quota failures
+  while the usage state still has quota.
+
+### Bounded A/B failover
+
+- An explicitly requested exhausted A account may fail over once to B, and B
+  may fail over once to A. Automatic failover is strictly A<->B even if the
+  configured allowlist later contains other aliases. `AUTO` remains fail-closed.
+- Model, reasoning, service tier, sandbox, workspace, web-research setting, and
+  Knowledge Preflight boundaries are preserved exactly; Bridge never lowers
+  execution quality to make a retry succeed.
+- A replacement account always starts a new native Codex thread. A thread from
+  one account is never resumed under another account.
+- Mid-task write-capable failover is allowed only when a bounded Git checkpoint
+  proves the workspace was clean before the attempt, remains clean afterwards,
+  HEAD is unchanged, and no mutation evidence was emitted. Otherwise Bridge
+  stops with `FAILOVER_REVIEW_REQUIRED` instead of risking duplicate mutation.
+- Account failover is bounded to one cycle; A -> B -> A ping-pong is forbidden.
+
+### Both accounts exhausted and durable provenance
+
+- When both accounts are quota exhausted, Bridge does not silently substitute
+  DSH for DevSpace/DS. Bridge returns
+  `BOTH_CODEX_ACCOUNTS_QUOTA_EXHAUSTED` and writes a durable
+  `handoff_required` receipt with `fallback_executor=ds` so the upper GOAL/DS
+  orchestrator can continue from the explicit safe checkpoint.
+- `task_result`, execution receipts, and the observer expose only bounded
+  failover provenance: requested/resolved alias, reason, quota window, reset
+  time, fallback executor, retry count, and mutation-checkpoint state.
+- Tokens, auth files, email addresses, API keys, raw provider payloads, prompt
+  bodies, and raw stdout/stderr are excluded from this provenance.
+
+### Validation checkpoint
+
+- Deterministic failover acceptance: PASS for normal A/B, five-hour and weekly
+  A<->B routing, exact-profile preservation, fresh native thread, both-account
+  exhaustion, mutation protection, loop bounding, stale/expired cache handling,
+  credential-safe receipts, and observer provenance.
+- Full unit suite: 413 tests, 408 passed, 0 failed, 5 platform skips.
+
 ## v1.4.2-biaogu.5
 
 This bounded account-routing repair preserves the production-accepted `.4`

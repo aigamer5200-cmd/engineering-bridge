@@ -53,7 +53,7 @@ test("persists only bounded provenance fields and survives reload", async () => 
   assert.equal(raw.includes("SECRET_OUTPUT_SENTINEL"), false);
   assert.equal(raw.includes("SECRET_TOKEN_SENTINEL"), false);
   const parsed = JSON.parse(raw) as { version: number; receipts: Array<Record<string, unknown>> };
-  assert.equal(parsed.version, 1);
+  assert.equal(parsed.version, 2);
   assert.equal(parsed.receipts.length, 1);
   assert.deepEqual(Object.keys(parsed.receipts[0] ?? {}).sort(), [
     "executor",
@@ -149,6 +149,49 @@ test("persists optional model, reasoning, and service-tier provenance without cr
   assert.equal(restored.get(taskId)?.model, "gpt-5.6-sol");
   assert.equal(restored.get(taskId)?.reasoning, "xhigh");
   assert.equal(restored.get(taskId)?.serviceTier, "standard");
+});
+
+test("persists failover provenance without prompt, token, email, auth path, or raw provider response", async () => {
+  const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipts-failover-")), "receipts.json");
+  const store = new ExecutionReceiptStore(statePath);
+  const taskId = newId();
+  await store.record({
+    ...receipt(taskId),
+    state: "handoff_required",
+    account: "A",
+    requestedAccount: "A",
+    resolvedExecutor: "codex",
+    failover: {
+      attempted: true,
+      fromAccount: "A",
+      reason: "ACCOUNT_5H_QUOTA_EXHAUSTED",
+      quotaWindow: "5h",
+      resetAt: "2026-09-12T06:39:30.000Z",
+      fallbackExecutor: "ds",
+      retryCount: 1,
+      checkpoint: "no_mutation_evidence",
+      evidenceCount: 2,
+      mutationEvidence: false,
+      ownerNotice: "Account A 5 小時額度已耗盡，已建立 DS handoff。"
+    }
+  });
+
+  const raw = readFileSync(statePath, "utf8");
+  for (const secret of [
+    "OPENAI_API_KEY",
+    "auth.json",
+    "SECRET_TOKEN",
+    "owner@example.com",
+    "raw_provider_response"
+  ]) {
+    assert.equal(raw.includes(secret), false);
+  }
+  const restored = new ExecutionReceiptStore(statePath);
+  await restored.load();
+  assert.equal(restored.get(taskId)?.state, "handoff_required");
+  assert.equal(restored.get(taskId)?.failover?.fallbackExecutor, "ds");
+  assert.equal(restored.get(taskId)?.failover?.reason, "ACCOUNT_5H_QUOTA_EXHAUSTED");
+  assert.equal(restored.get(taskId)?.requestedAccount, "A");
 });
 
 test("retains only the newest 500 valid receipts after load and next persist", async () => {

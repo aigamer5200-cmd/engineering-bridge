@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Codex may also use an explicit model, reasoning effort, task-local service tier, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt.",
+    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Explicit Codex A/B routing uses bounded quota preflight and may fail over once to the alternate account without changing model/reasoning/service tier/sandbox; if both accounts are quota-exhausted, the Bridge may fall back to read-only DSH with durable provenance. Codex may also use native live web research and a bounded Knowledge Preflight Receipt.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
@@ -219,7 +219,8 @@ async function main(): Promise<void> {
     const storedReceipt = executionReceipts.get(task_id);
     const receipt = storedReceipt !== undefined && (
       (view.state === "waiting_for_supervisor_review" && storedReceipt.state === "waiting_for_supervisor_review") ||
-      (view.state === "completed" && storedReceipt.state === "completed")
+      (view.state === "completed" && storedReceipt.state === "completed") ||
+      (view.state === "failed" && storedReceipt.state === "handoff_required")
     ) ? storedReceipt : undefined;
     const taskView = { task_id: view.taskId, state: view.state,
       ...(view.source === undefined ? {} : { source: view.source }),
@@ -229,7 +230,11 @@ async function main(): Promise<void> {
       ...(view.reasoning_effort === undefined ? {} : { reasoning_effort: view.reasoning_effort }),
       ...(view.service_tier === undefined ? {} : { service_tier: view.service_tier }),
       ...(view.account === undefined ? {} : { account: view.account }),
+      ...(view.requested_account === undefined ? {} : { requested_account: view.requested_account }),
+      ...(view.resolved_account === undefined ? {} : { resolved_account: view.resolved_account }),
+      ...(view.resolved_executor === undefined ? {} : { resolved_executor: view.resolved_executor }),
       ...(view.sandbox === undefined ? {} : { sandbox: view.sandbox }),
+      ...(view.failover === undefined ? {} : { failover: view.failover }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
       ...(view.output === undefined ? {} : { output: view.output }),
@@ -247,6 +252,27 @@ async function main(): Promise<void> {
           ...(receipt.reasoning === undefined ? {} : { reasoning: receipt.reasoning }),
           ...(receipt.serviceTier === undefined ? {} : { service_tier: receipt.serviceTier }),
           ...(receipt.account === undefined ? {} : { account: receipt.account }),
+          ...(receipt.requestedAccount === undefined ? {} : { requested_account: receipt.requestedAccount }),
+          ...(receipt.resolvedAccount === undefined ? {} : { resolved_account: receipt.resolvedAccount }),
+          ...(receipt.resolvedExecutor === undefined ? {} : { resolved_executor: receipt.resolvedExecutor }),
+          ...(receipt.failover === undefined ? {} : {
+            failover: {
+              attempted: receipt.failover.attempted,
+              ...(receipt.failover.fromAccount === undefined ? {} : { from_account: receipt.failover.fromAccount }),
+              ...(receipt.failover.toAccount === undefined ? {} : { to_account: receipt.failover.toAccount }),
+              ...(receipt.failover.reason === undefined ? {} : { reason: receipt.failover.reason }),
+              ...(receipt.failover.quotaWindow === undefined ? {} : { quota_window: receipt.failover.quotaWindow }),
+              ...(receipt.failover.resetAt === undefined ? {} : { reset_at: receipt.failover.resetAt }),
+              ...(receipt.failover.fallbackExecutor === undefined ? {} : { fallback_executor: receipt.failover.fallbackExecutor }),
+              retry_count: receipt.failover.retryCount,
+              continuation: {
+                checkpoint: receipt.failover.checkpoint,
+                evidence_count: receipt.failover.evidenceCount,
+                mutation_evidence: receipt.failover.mutationEvidence
+              },
+              ...(receipt.failover.ownerNotice === undefined ? {} : { owner_notice: receipt.failover.ownerNotice })
+            }
+          }),
           operation: receipt.operation,
           sandbox: receipt.sandbox,
           read_only: receipt.readOnly,
