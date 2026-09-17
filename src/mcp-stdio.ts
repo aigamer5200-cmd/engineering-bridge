@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a read-only task with the selected executor in a pre-registered workspace. Codex may use an explicit model, reasoning effort, task-local service tier, optional GOAL account alias, native live web research, and a bounded Knowledge Preflight Receipt. This tool does not modify workspace files.",
+    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Explicit Codex A/B routing uses bounded quota preflight and may fail over once to the alternate account without changing model/reasoning/service tier/sandbox; if both accounts are quota-exhausted, the Bridge may fall back to read-only DSH with durable provenance. Codex may also use native live web research and a bounded Knowledge Preflight Receipt.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
@@ -174,9 +174,10 @@ async function main(): Promise<void> {
       service_tier: z.enum(["standard", "priority"]).optional(),
       account: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
       web_research: z.boolean().optional().default(false),
+      sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, service_tier, account, web_research, preflight_receipt }) => {
+  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, service_tier, account, web_research, sandbox, preflight_receipt }) => {
     try {
       if (reasoning !== undefined && reasoning_effort !== undefined) {
         throw new CoreError("UNSUPPORTED_ACTION");
@@ -184,10 +185,12 @@ async function main(): Promise<void> {
       if (executor === "dsh" && (
         model !== undefined || reasoning !== undefined || reasoning_effort !== undefined ||
         service_tier !== undefined ||
-        account !== undefined || web_research
+        account !== undefined || web_research ||
+        (sandbox !== undefined && sandbox !== "read-only")
       )) {
         throw new CoreError("UNSUPPORTED_ACTION");
       }
+      const effectiveSandbox = sandbox ?? (executor === "codex" ? "danger-full-access" : "read-only");
       const { taskId } = service.startTask({
         workspace_id,
         instruction,
@@ -198,6 +201,7 @@ async function main(): Promise<void> {
         ...(service_tier === undefined ? {} : { service_tier }),
         ...(account === undefined ? {} : { account }),
         ...(web_research ? { web_research: true } : {}),
+        sandbox: effectiveSandbox,
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
       });
       return jsonContent({ task_id: taskId });
@@ -215,7 +219,8 @@ async function main(): Promise<void> {
     const storedReceipt = executionReceipts.get(task_id);
     const receipt = storedReceipt !== undefined && (
       (view.state === "waiting_for_supervisor_review" && storedReceipt.state === "waiting_for_supervisor_review") ||
-      (view.state === "completed" && storedReceipt.state === "completed")
+      (view.state === "completed" && storedReceipt.state === "completed") ||
+      (view.state === "failed" && storedReceipt.state === "handoff_required")
     ) ? storedReceipt : undefined;
     const taskView = { task_id: view.taskId, state: view.state,
       ...(view.source === undefined ? {} : { source: view.source }),
@@ -225,6 +230,11 @@ async function main(): Promise<void> {
       ...(view.reasoning_effort === undefined ? {} : { reasoning_effort: view.reasoning_effort }),
       ...(view.service_tier === undefined ? {} : { service_tier: view.service_tier }),
       ...(view.account === undefined ? {} : { account: view.account }),
+      ...(view.requested_account === undefined ? {} : { requested_account: view.requested_account }),
+      ...(view.resolved_account === undefined ? {} : { resolved_account: view.resolved_account }),
+      ...(view.resolved_executor === undefined ? {} : { resolved_executor: view.resolved_executor }),
+      ...(view.sandbox === undefined ? {} : { sandbox: view.sandbox }),
+      ...(view.failover === undefined ? {} : { failover: view.failover }),
       ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
       ready: view.ready,
       ...(view.output === undefined ? {} : { output: view.output }),
@@ -242,7 +252,29 @@ async function main(): Promise<void> {
           ...(receipt.reasoning === undefined ? {} : { reasoning: receipt.reasoning }),
           ...(receipt.serviceTier === undefined ? {} : { service_tier: receipt.serviceTier }),
           ...(receipt.account === undefined ? {} : { account: receipt.account }),
+          ...(receipt.requestedAccount === undefined ? {} : { requested_account: receipt.requestedAccount }),
+          ...(receipt.resolvedAccount === undefined ? {} : { resolved_account: receipt.resolvedAccount }),
+          ...(receipt.resolvedExecutor === undefined ? {} : { resolved_executor: receipt.resolvedExecutor }),
+          ...(receipt.failover === undefined ? {} : {
+            failover: {
+              attempted: receipt.failover.attempted,
+              ...(receipt.failover.fromAccount === undefined ? {} : { from_account: receipt.failover.fromAccount }),
+              ...(receipt.failover.toAccount === undefined ? {} : { to_account: receipt.failover.toAccount }),
+              ...(receipt.failover.reason === undefined ? {} : { reason: receipt.failover.reason }),
+              ...(receipt.failover.quotaWindow === undefined ? {} : { quota_window: receipt.failover.quotaWindow }),
+              ...(receipt.failover.resetAt === undefined ? {} : { reset_at: receipt.failover.resetAt }),
+              ...(receipt.failover.fallbackExecutor === undefined ? {} : { fallback_executor: receipt.failover.fallbackExecutor }),
+              retry_count: receipt.failover.retryCount,
+              continuation: {
+                checkpoint: receipt.failover.checkpoint,
+                evidence_count: receipt.failover.evidenceCount,
+                mutation_evidence: receipt.failover.mutationEvidence
+              },
+              ...(receipt.failover.ownerNotice === undefined ? {} : { owner_notice: receipt.failover.ownerNotice })
+            }
+          }),
           operation: receipt.operation,
+          sandbox: receipt.sandbox,
           read_only: receipt.readOnly,
           state: receipt.state,
           recorded_at: receipt.recordedAt
@@ -304,7 +336,7 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("authorize_workspace_write", {
-    description: "Grant persistent controlled-write authorization to a managed workspace after exact AUTHORIZE confirmation. Manual workspaces remain authoritative through workspaces.json. Ordinary run_task calls stay read-only.",
+    description: "Grant persistent controlled-patch authorization to a managed workspace after exact AUTHORIZE confirmation. Manual workspaces remain authoritative through workspaces.json. This permission gates APPLY only and is independent of the Codex run_task sandbox.",
     inputSchema: {
       workspace_id: z.string().min(1),
       confirmation: z.literal("AUTHORIZE")

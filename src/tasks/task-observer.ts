@@ -11,10 +11,22 @@ export type TaskObserverState =
   | "completed"
   | "failed";
 
+export interface TaskObserverFailover {
+  readonly attempted: boolean;
+  readonly fromAccount?: string;
+  readonly toAccount?: string;
+  readonly reason?: string;
+  readonly quotaWindow?: "5h" | "weekly";
+  readonly resetAt?: string;
+  readonly fallbackExecutor?: "dsh" | "ds";
+  readonly retryCount: number;
+}
+
 export interface TaskObserver {
   state(taskId: string, executor: string | undefined, state: TaskObserverState): void;
   thread(taskId: string, executor: string | undefined, threadId: string): void;
   evidence(taskId: string, executor: string | undefined, evidence: readonly ExecutorEvidence[]): void;
+  failover?(taskId: string, failover: TaskObserverFailover): void;
 }
 
 export const MAX_OBSERVER_LOG_BYTES = 512 * 1024;
@@ -115,6 +127,21 @@ export class TaskObserverLogger implements TaskObserver {
     if (this.lastEvidence.get(taskId) === summary) return;
     this.lastEvidence.set(taskId, summary);
     this.write(`task=${bounded(taskId)} executor=${bounded(executor ?? "none")} evidence=${summary}`);
+  }
+
+  failover(taskId: string, failover: TaskObserverFailover): void {
+    this.write([
+      `task=${bounded(taskId)}`,
+      "event=failover",
+      `attempted=${failover.attempted}`,
+      failover.fromAccount === undefined ? undefined : `from_account=${bounded(failover.fromAccount)}`,
+      failover.toAccount === undefined ? undefined : `to_account=${bounded(failover.toAccount)}`,
+      failover.reason === undefined ? undefined : `reason=${bounded(failover.reason)}`,
+      failover.quotaWindow === undefined ? undefined : `quota_window=${failover.quotaWindow}`,
+      failover.resetAt === undefined ? undefined : `reset_at=${bounded(failover.resetAt)}`,
+      failover.fallbackExecutor === undefined ? undefined : `fallback_executor=${failover.fallbackExecutor}`,
+      `retry_count=${failover.retryCount}`
+    ].filter((value): value is string => value !== undefined).join(" "));
   }
 
   private write(message: string): void {

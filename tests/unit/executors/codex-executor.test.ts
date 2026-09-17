@@ -227,6 +227,26 @@ test("forwards an explicit task-local service tier to thread/start and turn/star
   assert.equal(turnStart.params.serviceTier, "standard");
 });
 
+test("maps danger-full-access to the native Codex full-access sandbox", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "done" }, invocations));
+
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "modify the workspace",
+    sandbox: "danger-full-access"
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
+  assert.equal(threadStart.params.sandbox, "danger-full-access");
+  assert.equal(threadStart.params.approvalPolicy, "never");
+  assert.deepEqual(turnStart.params.sandboxPolicy, { type: "dangerFullAccess" });
+  assert.equal(turnStart.params.approvalPolicy, "never");
+});
+
 test("validates the requested model and effort before starting the normal Codex flow", async () => {
   const invocations: Invocation[] = [];
   const executor = timedExecutor(fakeStarter({
@@ -383,6 +403,79 @@ test("explicit Codex account fails closed when the optional router is unavailabl
   if (result.kind === "failed") assert.equal(result.error.code, "CODEX_ACCOUNT_UNAVAILABLE");
 });
 
+test("explicit Codex account reports an active cached quota exhaustion before launch", async () => {
+  const invocations: Invocation[] = [];
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-quota-"));
+  const switchExe = join(root, "codex-switch.exe");
+  const switchHome = join(root, "switch-home");
+  const isolatedCodexHome = join(root, "isolated-codex-home");
+  const codexBinDir = join(root, "codex-bin");
+  mkdirSync(switchHome);
+  mkdirSync(codexBinDir);
+  writeFileSync(switchExe, "stub");
+  writeFileSync(join(codexBinDir, "codex.exe"), "stub");
+  writeFileSync(join(switchHome, "cache.json"), JSON.stringify({
+    entries: {
+      B: {
+        account_limited: true,
+        rate_limit_reached_type: "rate_limit_reached",
+        primary_used: 100,
+        primary_reset: Math.floor(Date.now() / 1000) + 3600
+      }
+    }
+  }));
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "no" }, invocations), {
+    PATH: "C:\\native-path",
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
+    ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_BIN_DIR: codexBinDir,
+    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
+  }, "win32");
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "use B", account: "B" });
+
+  assert.equal(result.kind, "failed");
+  if (result.kind === "failed") assert.equal(result.error.code, "ACCOUNT_5H_QUOTA_EXHAUSTED");
+  assert.equal(invocations.length, 0);
+});
+
+test("expired cached quota exhaustion does not block a Codex account launch", async () => {
+  const invocations: Invocation[] = [];
+  const root = mkdtempSync(join(tmpdir(), "bridge-codex-quota-expired-"));
+  const switchExe = join(root, "codex-switch.exe");
+  const switchHome = join(root, "switch-home");
+  const isolatedCodexHome = join(root, "isolated-codex-home");
+  const codexBinDir = join(root, "codex-bin");
+  mkdirSync(switchHome);
+  mkdirSync(codexBinDir);
+  writeFileSync(switchExe, "stub");
+  writeFileSync(join(codexBinDir, "codex.exe"), "stub");
+  writeFileSync(join(switchHome, "cache.json"), JSON.stringify({
+    entries: {
+      B: {
+        account_limited: true,
+        rate_limit_reached_type: "rate_limit_reached",
+        primary_used: 100,
+        primary_reset: Math.floor(Date.now() / 1000) - 1
+      }
+    }
+  }));
+  const executor = new CodexExecutor(TRUSTED_CWD, fakeStarter({ appServerOutput: "after reset" }, invocations), {
+    PATH: "C:\\native-path",
+    ENGINEERING_BRIDGE_CODEX_SWITCH_EXECUTABLE: switchExe,
+    ENGINEERING_BRIDGE_CODEX_SWITCH_HOME: switchHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_HOME: isolatedCodexHome,
+    ENGINEERING_BRIDGE_CODEX_MULTI_ACCOUNT_CODEX_BIN_DIR: codexBinDir,
+    ENGINEERING_BRIDGE_CODEX_ACCOUNT_ALLOWLIST: "A,B"
+  }, "win32");
+
+  const result = await executor.execute({ taskId: TASK_ID, instruction: "use B", account: "B" });
+
+  assert.equal(result.kind, "completed");
+  assert.equal(invocations.length, 1);
+});
+
 test("AUTO account remains deferred instead of silently selecting a profile", async () => {
   const root = mkdtempSync(join(tmpdir(), "bridge-codex-auto-"));
   const switchExe = join(root, "codex-switch.exe");
@@ -405,6 +498,44 @@ test("live web research enables native web_search without enabling OS network", 
   const turnStart = messages.find((message: { method?: string }) => message.method === "turn/start");
   assert.equal(threadStart.params.config.web_search, "live");
   assert.equal(turnStart.params.sandboxPolicy.networkAccess, false);
+});
+
+test("DS-preflight bootstrap disables memory and automatic skill instructions while merging web search", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "bounded answer" }, invocations));
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect bounded files",
+    webSearch: "live",
+    bootstrap: { mode: "ds_preflight", memoryRequired: false }
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  assert.deepEqual(threadStart.params.config, {
+    web_search: "live",
+    skills: { include_instructions: false },
+    features: { memories: false }
+  });
+});
+
+test("DS-preflight memory-required bootstrap preserves configured memory while keeping skills explicit-only", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "memory answer" }, invocations));
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "use required memory",
+    bootstrap: { mode: "ds_preflight", memoryRequired: true }
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  assert.deepEqual(threadStart.params.config, {
+    skills: { include_instructions: false }
+  });
+  assert.equal("features" in threadStart.params.config, false);
 });
 
 test("legacy reasoning alias is validated and sent as the upstream turn effort", async () => {
@@ -741,7 +872,7 @@ test("normal Codex completion clears lifecycle work and ignores late process or 
     error instanceof CoreError && error.code === "INVALID_STATE_TRANSITION");
 });
 
-test("maps a thrown spawn and a process error to unavailable", async () => {
+test("maps a thrown spawn and a process error to process/spawn failure", async () => {
   const throwing: ProcessStarter = () => { throw new Error("secret spawn details"); };
   const thrown = await new CodexExecutor(TRUSTED_CWD, throwing, {}).execute({ taskId: TASK_ID, instruction: "x" });
   const emitted = await new CodexExecutor(TRUSTED_CWD, fakeStarter({ processError: true }, []), {})
@@ -750,7 +881,7 @@ test("maps a thrown spawn and a process error to unavailable", async () => {
   for (const result of [thrown, emitted]) {
     assert.deepEqual(withoutDiagnostics(result), {
       kind: "failed",
-      error: { code: "CODEX_UNAVAILABLE", message: "Codex is unavailable." }
+      error: { code: "PROCESS_SPAWN_FAILURE", message: "The Codex process could not be started." }
     });
   }
 });
@@ -820,8 +951,8 @@ test("reports an allowlisted failed-turn reason without exposing raw error detai
   assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
     error: {
-      code: "CODEX_EXECUTION_FAILED",
-      message: "Codex execution failed: the selected model is at capacity."
+      code: "MODEL_CAPACITY",
+      message: "The selected Codex model is at capacity."
     },
     threadId: "thread-1",
     evidence: []
@@ -830,6 +961,30 @@ test("reports an allowlisted failed-turn reason without exposing raw error detai
   assert.equal(serialized.includes("secret upstream message"), false);
   assert.equal(serialized.includes("/private/path"), false);
   assert.equal(serialized.includes("secret diagnostics"), false);
+});
+
+test("classifies structured failed-turn auth, rate-limit, and transient errors without exposing provider detail", async () => {
+  for (const [codexErrorInfo, expectedCode] of [
+    ["authenticationFailed", "ACCOUNT_AUTH_INVALID"],
+    ["rateLimitReached", "PROVIDER_RATE_LIMIT"],
+    ["temporarilyUnavailable", "PROVIDER_TRANSIENT"]
+  ] as const) {
+    const result = await new CodexExecutor(TRUSTED_CWD, fakeStarter({
+      appServerOutput: "",
+      turnError: {
+        message: "SECRET_PROVIDER_DETAIL /private/path",
+        codexErrorInfo,
+        additionalDetails: "SECRET_PROVIDER_DIAGNOSTICS"
+      }
+    }, []), {}).execute({ taskId: TASK_ID, instruction: "x" });
+
+    assert.equal(result.kind, "failed");
+    if (result.kind === "failed") assert.equal(result.error.code, expectedCode);
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes("SECRET_PROVIDER_DETAIL"), false);
+    assert.equal(serialized.includes("SECRET_PROVIDER_DIAGNOSTICS"), false);
+    assert.equal(serialized.includes("/private/path"), false);
+  }
 });
 
 test("an interrupted turn keeps the last completed agent text as real partial output", async () => {
@@ -987,15 +1142,144 @@ test("fails promptly with bounded diagnostics for an overlong unterminated Codex
   const invocation = invocations[0];
   assert.ok(invocation);
 
-  invocation.writeStdout("x".repeat(40_000));
-  invocation.writeStdout(`${"y".repeat(40_000)}${secret}`);
+  invocation.writeStdout("x".repeat(9 * 1024 * 1024));
+  invocation.writeStdout(`${"y".repeat(9 * 1024 * 1024)}${secret}`);
 
   const result = await pending;
   assert.equal(result.kind, "failed");
   if (result.kind !== "failed") return;
   assert.equal(result.error.code, "CODEX_PROTOCOL_ERROR");
-  assert.ok(JSON.stringify(result).length <= 2_048);
+  assert.ok(JSON.stringify(result).length <= 4_096);
   assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(result.diagnostics?.protocol?.stage, "unterminated_frame_too_large");
+  assert.ok((result.diagnostics?.protocol?.stdout_bytes ?? 0) > 16 * 1024 * 1024);
+  assert.equal(result.diagnostics?.protocol?.stdout_tail_bytes, 4_096);
+  assert.match(result.diagnostics?.protocol?.stdout_tail_sha256 ?? "", /^[0-9a-f]{64}$/u);
+});
+
+test("accepts a large valid commandExecution frame without misclassifying it as a protocol error", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), process.platform, {
+    ...SHORT_TIMING,
+    executionTimeoutMs: 1_000,
+    protocolInactivityTimeoutMs: 1_000,
+    rpcCallTimeoutMs: 1_000
+  });
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect many files" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "cmd-large",
+        type: "commandExecution",
+        status: "completed",
+        command: "Get-Content several-large-files",
+        aggregatedOutput: "繁中🙂".repeat(40_000),
+        exitCode: 0,
+        durationMs: 50
+      }
+    }
+  });
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "message-1", type: "agentMessage", text: "架構稽核完成。🙂" }
+    }
+  });
+  invocation.send({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } }
+  });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  if (result.kind !== "completed") return;
+  assert.equal(result.output, "架構稽核完成。🙂");
+  assert.equal(result.evidence?.some(({ id }) => id === "cmd-large"), true);
+});
+
+test("buffers a valid Codex JSONL frame across arbitrary stdout chunks", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations), process.platform, {
+    ...SHORT_TIMING,
+    executionTimeoutMs: 1_000,
+    protocolInactivityTimeoutMs: 1_000,
+    rpcCallTimeoutMs: 1_000
+  });
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  const frame = `${JSON.stringify({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "message-1", type: "agentMessage", text: "繁中分段🙂完成。" }
+    }
+  })}\n`;
+  const cut1 = Math.floor(frame.length / 3);
+  const cut2 = Math.floor(frame.length * 2 / 3);
+  invocation.writeStdout(frame.slice(0, cut1));
+  invocation.writeStdout(frame.slice(cut1, cut2));
+  invocation.writeStdout(frame.slice(cut2));
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  if (result.kind === "completed") assert.equal(result.output, "繁中分段🙂完成。");
+});
+
+test("a failed commandExecution remains evidence and does not turn a successful turn into a protocol failure", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "audit" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "cmd-failed", type: "commandExecution", status: "failed", command: "rg bad-glob" }
+    }
+  });
+  invocation.send({
+    method: "item/completed",
+    params: { threadId: "thread-1", turnId: "turn-1", item: { id: "message-1", type: "agentMessage", text: "Audit completed despite one shell miss." } }
+  });
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  assert.equal(result.evidence?.find(({ id }) => id === "cmd-failed")?.status, "failed");
+});
+
+test("ignores an unknown optional notification while preserving the active turn", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "inspect" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+
+  invocation.send({ method: "future/optionalNotification", params: { threadId: "thread-1", turnId: "turn-1", optionalField: 1 } });
+  invocation.send({ method: "item/completed", params: { item: { id: "message-1", type: "agentMessage", text: "done" } } });
+  invocation.send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } } });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
 });
 
 test("exposes only executor start/end timing metadata in structured diagnostics", async () => {
@@ -1213,7 +1497,7 @@ test("POSIX: a Windows-style codex.exe layout on PATH does not change the bare s
   assert.deepEqual(invocation.args, ["app-server", "--stdio"]);
 });
 
-test("win32: a spawned command that does not resolve still maps to CODEX_UNAVAILABLE", async () => {
+test("win32: a spawned command that does not resolve maps to process/spawn failure", async () => {
   const dir = windowsDirectory();
   const executor = new CodexExecutor(TRUSTED_CWD,
     fakeStarter({ processError: true }, []),
@@ -1223,6 +1507,6 @@ test("win32: a spawned command that does not resolve still maps to CODEX_UNAVAIL
 
   assert.deepEqual(withoutDiagnostics(result), {
     kind: "failed",
-    error: { code: "CODEX_UNAVAILABLE", message: "Codex is unavailable." }
+    error: { code: "PROCESS_SPAWN_FAILURE", message: "The Codex process could not be started." }
   });
 });

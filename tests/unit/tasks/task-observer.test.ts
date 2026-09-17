@@ -97,6 +97,34 @@ test("observer is off unless explicitly enabled", () => {
   }
 });
 
+test("observer failover provenance is bounded and excludes credentials and provider payloads", () => {
+  const directory = mkdtempSync(join(tmpdir(), "engineering-bridge-observer-failover-"));
+  try {
+    const observer = new TaskObserverLogger(join(directory, "workspaces.json"), "log");
+    observer.failover("550e8400-e29b-41d4-a716-446655440000", {
+      attempted: true,
+      fromAccount: "A",
+      toAccount: "B",
+      reason: "ACCOUNT_5H_QUOTA_EXHAUSTED",
+      quotaWindow: "5h",
+      resetAt: "2026-09-12T06:39:30.000Z",
+      retryCount: 1
+    });
+
+    const log = readFileSync(observer.logPath, "utf8");
+    assert.match(log, /event=failover/u);
+    assert.match(log, /from_account=A/u);
+    assert.match(log, /to_account=B/u);
+    assert.match(log, /reason=ACCOUNT_5H_QUOTA_EXHAUSTED/u);
+    assert.match(log, /quota_window=5h/u);
+    for (const forbidden of ["OPENAI_API_KEY", "auth.json", "owner@example.com", "raw_provider_response"]) {
+      assert.equal(log.includes(forbidden), false);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("window observer reuses an existing live observer lease", { skip: process.platform !== "win32" }, () => {
   const directory = mkdtempSync(join(tmpdir(), "engineering-bridge-observer-window-"));
   try {

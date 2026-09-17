@@ -10,7 +10,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { CoreError } from "../../../src/core/errors.js";
 import type { SerializedError } from "../../../src/core/errors.js";
 import type { Id } from "../../../src/core/ids.js";
-import type { Executor, ExecutorRequest, ExecutorResult } from "../../../src/executors/executor.js";
+import type { Executor, ExecutorDiagnostics, ExecutorRequest, ExecutorResult } from "../../../src/executors/executor.js";
 import { DshExecutor } from "../../../src/executors/dsh-executor.js";
 import { RegisteredWorkspaceTaskService } from "../../../src/tasks/registered-workspace-task-service.js";
 import { ExecutionReceiptStore } from "../../../src/tasks/execution-receipt-store.js";
@@ -101,7 +101,7 @@ async function waitForInteractiveReady(service: RegisteredWorkspaceTaskService, 
   }
 }
 
-test("Bridge persists read-only Codex execution provenance for interactive run_task", async () => {
+test("Bridge persists exact Codex sandbox provenance for interactive run_task", async () => {
   const statePath = join(mkdtempSync(join(tmpdir(), "engineering-bridge-receipt-")), "receipts.json");
   const receipts = new ExecutionReceiptStore(statePath);
   await receipts.load();
@@ -110,7 +110,12 @@ test("Bridge persists read-only Codex execution provenance for interactive run_t
   };
   const service = new RegisteredWorkspaceTaskService(registry(), () => executor, receipts);
 
-  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect", executor: "codex" });
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "codex",
+    sandbox: "danger-full-access"
+  });
   await waitForInteractiveReady(service, taskId);
 
   const ready = receipts.get(taskId);
@@ -118,7 +123,8 @@ test("Bridge persists read-only Codex execution provenance for interactive run_t
   assert.equal(ready?.workspaceRoot, ROOT);
   assert.equal(ready?.operation, "run_task");
   assert.equal(ready?.executor, "codex");
-  assert.equal(ready?.readOnly, true);
+  assert.equal(ready?.sandbox, "danger-full-access");
+  assert.equal(ready?.readOnly, false);
   assert.equal(ready?.state, "waiting_for_supervisor_review");
 
   await service.controlTask(taskId, "accept");
@@ -595,6 +601,50 @@ test("failed and interrupted interactive results do not expose executor diagnost
   }
 });
 
+test("CODEX_PROTOCOL_ERROR exposes only bounded protocol diagnostics for debugging", async () => {
+  const executor: Executor = {
+    execute: async () => ({
+      kind: "failed",
+      error: { code: "CODEX_PROTOCOL_ERROR", message: "Codex returned an invalid response." },
+      diagnostics: {
+        executor_started_at: "2026-09-12T01:02:03.004Z",
+        executor_ended_at: "2026-09-12T01:02:04.005Z",
+        protocol: {
+          stage: "json_parse",
+          event_sequence: 7,
+          last_frame_bytes: 1234,
+          last_method: "item/completed",
+          last_item_type: "commandExecution",
+          final_frame_seen: false,
+          stdout_bytes: 2345,
+          stdout_tail_bytes: 4096,
+          stdout_tail_sha256: "a".repeat(64),
+          stderr_bytes: 12,
+          stderr_tail_bytes: 12,
+          stderr_tail_sha256: "b".repeat(64),
+          subprocess_exit_code: 0
+        }
+      }
+    })
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect" });
+  await waitForInteractiveReady(service, taskId);
+
+  const view = service.taskView(taskId);
+  assert.equal(view?.state, "failed");
+  assert.equal(view?.error?.code, "CODEX_PROTOCOL_ERROR");
+  const diagnostics = view?.diagnostics;
+  assert.ok(diagnostics && "executor_started_at" in diagnostics);
+  const executorDiagnostics = diagnostics as ExecutorDiagnostics;
+  assert.equal(executorDiagnostics.protocol?.stage, "json_parse");
+  assert.equal(executorDiagnostics.protocol?.event_sequence, 7);
+  assert.equal("instruction" in diagnostics, false);
+  assert.equal("output" in diagnostics, false);
+  const serialized = JSON.stringify(view);
+  assert.equal(serialized.includes("secret"), false);
+});
+
 test("run_task interrupt reaches TASK_INTERRUPTED after bounded DSH TERM and KILL without close", async () => {
   const signals: string[] = [];
   const service = new RegisteredWorkspaceTaskService(registry(), (executor, workspaceRoot) => {
@@ -812,7 +862,7 @@ test("continue preserves the same native Codex thread id and passes it to the re
   assert.equal(service.taskView(taskId)?.threadId, "thread-1");
 });
 
-test("knowledge preflight receipt is injected on every turn and survives continue", async () => {
+test("legacy-schema knowledge preflight defaults to bounded bootstrap on every turn and survives continue", async () => {
   const requests: ExecutorRequest[] = [];
   const executor: Executor = {
     execute: async (request) => {
@@ -838,11 +888,69 @@ test("knowledge preflight receipt is injected on every turn and survives continu
     assert.match(request.instruction, /knowledge_base_head: 670414561cb44acfd79bc1d5e858ee814a09a240/u);
     assert.equal(request.instruction.includes(`workspace_root: ${platformRoot}`), true);
     assert.match(request.instruction, /sandbox: read-only/u);
+    assert.deepEqual(request.bootstrap, {
+      mode: "ds_preflight",
+      memoryRequired: false
+    });
+    assert.match(request.instruction, /- goal_autostart: false/u);
   }
   assert.equal(requests[0]?.instruction.endsWith("Task instruction:\nfirst bounded task"), true);
   assert.equal(requests[1]?.instruction.endsWith("Task instruction:\nsecond bounded task"), true);
   assert.equal(requests[1]?.instruction.includes("Task instruction:\nfirst bounded task"), false);
   assert.deepEqual(requests.map(({ threadId }) => threadId), [undefined, "thread-1"]);
+});
+
+test("completed DS preflight derives a Codex-only task-local bootstrap policy", async () => {
+  const requests: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      requests.push(request);
+      return { kind: "completed", output: "done", threadId: "thread-1" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "bounded implementation",
+    executor: "codex",
+    preflight_receipt: {
+      ...PREFLIGHT_RECEIPT,
+      preflight_completed: true,
+      memory_required: true,
+      required_skills: []
+    }
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  assert.deepEqual(requests[0]?.bootstrap, {
+    mode: "ds_preflight",
+    memoryRequired: true
+  });
+  assert.match(requests[0]?.instruction ?? "", /- goal_autostart: false/u);
+});
+
+test("explicit incomplete preflight preserves text-only bootstrap compatibility", async () => {
+  const requests: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      requests.push(request);
+      return { kind: "completed", output: "done", threadId: "thread-1" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "legacy bootstrap",
+    executor: "codex",
+    preflight_receipt: {
+      ...PREFLIGHT_RECEIPT,
+      preflight_completed: false
+    }
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  assert.equal(requests[0]?.bootstrap, undefined);
+  assert.equal((requests[0]?.instruction ?? "").includes("bootstrap_policy:"), false);
 });
 
 test("DSH taskView reports executor dsh without fabricating a thread id, across continue", async () => {
@@ -973,7 +1081,7 @@ test("legacy controlled-patch taskView reports the fixed codex executor without 
   assert.equal(view?.threadId, undefined);
 });
 
-test("interactive execution remains read-only when workspace writes are allowed", async () => {
+test("interactive execution uses the explicitly requested sandbox independent of controlled-write authorization", async () => {
   const calls: ExecutorRequest[] = [];
   const executor: Executor = {
     execute: async (request) => { calls.push(request); return { kind: "completed", output: "done" }; }
@@ -982,14 +1090,31 @@ test("interactive execution remains read-only when workspace writes are allowed"
     { id: "known", root: ROOT, allow_write: true }
   ]);
   const service = new RegisteredWorkspaceTaskService(writableRegistry, () => executor);
-  const { taskId } = service.startTask({ workspace_id: "known", instruction: "inspect" });
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    sandbox: "danger-full-access"
+  });
 
   while (service.taskView(taskId)?.state === "queued" || service.taskView(taskId)?.state === "running") {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.sandbox, "read-only");
+  assert.equal(calls[0]?.sandbox, "danger-full-access");
+  assert.equal(service.taskView(taskId)?.sandbox, "danger-full-access");
+});
+
+test("DSH rejects any sandbox expansion beyond read-only", () => {
+  const service = new RegisteredWorkspaceTaskService(registry(), () => ({
+    execute: async () => ({ kind: "completed", output: "done" })
+  }));
+  assert.throws(() => service.startTask({
+    workspace_id: "known",
+    instruction: "inspect",
+    executor: "dsh",
+    sandbox: "danger-full-access"
+  }));
 });
 
 test("normalizes and fixes the executor selection for each interactive task", async () => {

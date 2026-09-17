@@ -1,6 +1,6 @@
 # Engineering Bridge 1.4.2-biaogu.1 Simplified Upgrade Handoff
 
-## I/W completion
+## 2026-09-06 main I/W completion record
 
 Owner-authorized I/W completed on 2026-09-06.
 
@@ -14,9 +14,62 @@ post-I/W main regression: 382 total / 377 PASS / 0 FAIL / 5 Windows-specific SKI
 git diff --check: PASS
 ```
 
-Production was not restarted by the Git integration. The already-promoted
-`1.4.2-biaogu.1` runtime remains the active Production runtime, and
-`1.2.1-biaogu.6` remains the retained previous/rollback target.
+This historical record is retained during the later `.8` source-authority
+reconciliation. It describes only the 2026-09-06 `.1` integration and does not
+override the newer Production/runtime checkpoints recorded elsewhere.
+
+## 2026-09-06 post-acceptance connectivity follow-up
+
+Owner reported that the current Web ChatGPT window could still create Bridge
+tasks but a default Codex `run_task` ended as `CODEX_EXECUTION_FAILED`.
+
+This follow-up did **not** identify a Bridge Production regression.
+
+Current Production verification:
+
+```text
+Bridge Production: 1.4.2-biaogu.1
+local MCP / OAuth health: PASS
+public MCP / OAuth health: PASS
+local authenticated tools/list: exact 13 tools / PASS
+public authenticated tools/list: exact 13 tools / PASS
+explicit B Codex real turn via local Production: PASS
+explicit B Codex real turn via public Production: PASS
+sandbox unchanged in both E2E checks: PASS
+```
+
+The account router's non-secret usage status showed that the currently native /
+default account had exhausted its long-window quota while explicit alias `B`
+still had available quota. The accepted product rule remains unchanged:
+
+```text
+no silent A -> B account fallback
+account routing stays explicit and task-scoped
+AUTO remains fail-closed
+```
+
+The active ChatGPT connector session in the reporting window still exposed the
+pre-1.4 exact 10-tool schema. In particular, its cached `run_task` schema did
+not expose the 1.4.2 `account` / exact model / reasoning routing inputs. A fresh
+authenticated call made directly to the same public Production endpoint
+returned the exact 13-tool 1.4.2 surface and completed an explicit `B` real
+Codex turn successfully.
+
+Therefore the remaining limitation is a **stale Web ChatGPT connector/tool
+schema in that already-open conversation**, not a local Bridge runtime,
+tunnel, OAuth, or Codex-executor defect. Do not patch Bridge Core or silently
+change the default account to work around an old conversation schema. Open a
+fresh ChatGPT window / connector session and re-run tools discovery; the fresh
+session should receive the current 13-tool schema and can then route explicit
+`B` normally.
+
+The earlier diagnostic `DSH_UNAVAILABLE` refers to Bridge's separate optional
+DeepSeek Shell executor. It is not DevSpace (DS) and is not a blocker for the
+Codex Bridge path verified above. No DSH installation/change was performed in
+this follow-up.
+
+No credential, token, cookie, auth-file payload, email address, or account ID
+was written to this handoff.
 
 ## Current execution context
 
@@ -296,15 +349,18 @@ or auth payload.
   authorization;
 - do not broaden Worktree authority outside `D:\WORKTREE_ZONE`.
 
-## Final integrated state
+## Remaining Owner gate
 
 ```text
 Upgrade execution: COMPLETE
 Production acceptance: PASS
 Rollback capability: PRESERVED
 Candidate source branch: checkpointed/pushed
-Owner I/W: COMPLETE
-fork main integration: COMPLETE
+
+Next action requires Owner authorization:
+I/W candidate/bridge-v1.4.2-biaogu-20260906 into the fork main, or leave the
+source candidate branch isolated while Production continues to run the
+immutable 1.4.2-biaogu.1 runtime.
 ```
 
 The next window/account can continue from this repository state plus this

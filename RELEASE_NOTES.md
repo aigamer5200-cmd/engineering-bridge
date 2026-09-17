@@ -1,5 +1,287 @@
 # Release notes
 
+## v1.4.2-biaogu.8
+
+This release makes the `.7` DS-preflight bootstrap suppression compatible with
+already-open ChatGPT Connector sessions that still expose the older
+`preflight_receipt` schema.
+
+### Cached-schema compatibility
+
+- A valid `KnowledgePreflightReceipt` now means DS preflight is complete by
+  default even when the caller cannot send the newer `preflight_completed`
+  field.
+- The stale-schema path therefore receives the same native Codex bootstrap
+  protection as a fresh `.7` caller: automatic skill catalogue instructions
+  are disabled and native memories are disabled unless explicitly required.
+- Calls with no preflight receipt remain byte-for-byte legacy-compatible.
+- Future callers may explicitly send `preflight_completed=false` to preserve a
+  text-only receipt without native bootstrap suppression.
+- Account routing, model/reasoning/service tier, sandbox, failover, protocol
+  transport, and GOAL authority are unchanged.
+
+### Validation checkpoint
+
+- Targeted stale/new-schema bootstrap regression: 10 passed, 0 failed.
+- `npm run typecheck`: PASS.
+- Full `npm test`: 421 total, 416 passed, 0 failed, 5 skipped.
+- No global Codex config, credential, account, GOAL, Product, LINE, R2, or GCP
+  mutation is part of this release.
+
+## v1.4.2-biaogu.7
+
+This release layers the Codex bootstrap / Memory preflight slimming fix on top
+of the production-accepted `.6` transport, quota classification, and bounded
+A/B account failover lineage.
+
+### DS-preflight bootstrap policy
+
+- `KnowledgePreflightReceipt` adds optional `preflight_completed`,
+  `memory_required`, and `required_skills` fields instead of introducing a
+  second preflight system.
+- A completed DS preflight becomes a task-local native Codex bootstrap policy.
+  Automatic skill catalogue instructions are disabled with
+  `skills.include_instructions=false`.
+- When memory is not required, the task-local Codex config sets
+  `features.memories=false`; when memory is explicitly required, Bridge leaves
+  the configured memory feature untouched.
+- Existing live web-search config is merged with the bootstrap config rather
+  than replaced.
+- The rendered preflight receipt explicitly records bounded repository
+  discovery, explicit-only skills, and no implicit GOAL autostart.
+- Legacy calls without `preflight_completed=true` remain unchanged.
+
+### Preserved `.6` routing and failover behavior
+
+- Explicit A/B quota preflight, one-cycle account failover, fresh account-bound
+  native threads, mutation guards, and durable DS handoff remain intact.
+- Bootstrap policy is recomputed for the effective Codex executor on every
+  bounded execution/failover attempt, so account failover cannot silently drop
+  the DS preflight boundary.
+- Model, reasoning, service tier, sandbox, workspace, web research, and account
+  routing semantics are unchanged.
+
+### Validation checkpoint
+
+- Integrated source `npm run typecheck`: PASS.
+- Bootstrap + task-service + executor + account-failover targeted regression:
+  119 tests, 119 passed, 0 failed.
+- Real Luna/MAX feature-branch smokes previously proved both the no-memory and
+  explicit-memory-required paths.
+- Immutable `.7` prepare validation passed `npm ci`, typecheck, full tests, and
+  build; Canary passed on exact `gpt-5.6-luna / max / priority`.
+- Guarded Production promotion passed with `.6` retained as the rollback
+  runtime, followed by a successful Production MCP smoke.
+- A real GOAL-managed Production smoke from the exact `.7` release commit read
+  only `package.json`, returned `VERSION=1.4.2-biaogu.7`, and recorded
+  `memory_seen=false`, `skills_seen=false`, `goal_seen=false`, with no sandbox
+  mutation.
+- An already-open Web ChatGPT Connector may retain the pre-`.7` cached tool
+  schema; fresh Production `tools/list` exposes all three new preflight fields.
+
+## v1.4.2-biaogu.6
+
+This release upgrades the `.5` single-account quota guard into a bounded
+runtime failover controller for explicit A/B Codex tasks while preserving the
+accepted `.4` transport repair and exact execution-profile routing.
+
+### Usage and failure classification
+
+- The non-secret `codex-switch` cache now distinguishes both the primary
+  five-hour window and the secondary weekly window, including reset times.
+- Stale cache state is boundedly refreshed through `codex-switch --json list`;
+  command output is discarded and is never copied into Bridge logs or task
+  artifacts.
+- If a stale cache cannot be refreshed, the usage state becomes `unknown` and
+  cannot drive automatic failover from stale quota evidence.
+- Structured app-server failures are classified before generic process text:
+  account auth/profile, model capacity, provider rate limit/transient,
+  protocol, process spawn, RPC transport, stalled, interrupted, generic, and
+  unknown failure lanes remain distinct.
+- Generic provider or protocol failures are not inferred to be quota failures
+  while the usage state still has quota.
+
+### Bounded A/B failover
+
+- An explicitly requested exhausted A account may fail over once to B, and B
+  may fail over once to A. Automatic failover is strictly A<->B even if the
+  configured allowlist later contains other aliases. `AUTO` remains fail-closed.
+- Model, reasoning, service tier, sandbox, workspace, web-research setting, and
+  Knowledge Preflight boundaries are preserved exactly; Bridge never lowers
+  execution quality to make a retry succeed.
+- A replacement account always starts a new native Codex thread. A thread from
+  one account is never resumed under another account.
+- Mid-task write-capable failover is allowed only when a bounded Git checkpoint
+  proves the workspace was clean before the attempt, remains clean afterwards,
+  HEAD is unchanged, and no mutation evidence was emitted. Otherwise Bridge
+  stops with `FAILOVER_REVIEW_REQUIRED` instead of risking duplicate mutation.
+- Account failover is bounded to one cycle; A -> B -> A ping-pong is forbidden.
+
+### Both accounts exhausted and durable provenance
+
+- When both accounts are quota exhausted, Bridge does not silently substitute
+  DSH for DevSpace/DS. Bridge returns
+  `BOTH_CODEX_ACCOUNTS_QUOTA_EXHAUSTED` and writes a durable
+  `handoff_required` receipt with `fallback_executor=ds` so the upper GOAL/DS
+  orchestrator can continue from the explicit safe checkpoint.
+- `task_result`, execution receipts, and the observer expose only bounded
+  failover provenance: requested/resolved alias, reason, quota window, reset
+  time, fallback executor, retry count, and mutation-checkpoint state.
+- Tokens, auth files, email addresses, API keys, raw provider payloads, prompt
+  bodies, and raw stdout/stderr are excluded from this provenance.
+
+### Validation checkpoint
+
+- Deterministic failover acceptance: PASS for normal A/B, five-hour and weekly
+  A<->B routing, exact-profile preservation, fresh native thread, both-account
+  exhaustion, mutation protection, loop bounding, stale/expired cache handling,
+  credential-safe receipts, and observer provenance.
+- Full unit suite: 413 tests, 408 passed, 0 failed, 5 platform skips.
+
+## v1.4.2-biaogu.5
+
+This bounded account-routing repair preserves the production-accepted `.4`
+transport behavior while distinguishing an exhausted explicit Codex account
+from a Bridge execution failure.
+
+### Explicit account quota classification
+
+- When `account=A|B` is explicitly requested, Bridge now reads only the
+  non-secret local `codex-switch` usage cache for that alias before launch.
+- An alias is classified as exhausted only when the cache says the account is
+  limited, the primary usage window is at 100%, the limit reason is
+  `rate_limit_reached`, and the cached reset timestamp is still in the future.
+- That state returns `CODEX_ACCOUNT_QUOTA_EXHAUSTED` instead of the misleading
+  generic `CODEX_EXECUTION_FAILED`.
+- Once the cached reset timestamp has passed, the old exhausted entry no longer
+  blocks launch, so the account automatically resumes without a configuration
+  change.
+- Missing or malformed cache data is ignored and falls back to the existing
+  launch path. No auth/token/API-key content is read or returned.
+- Explicit account provenance is preserved: Bridge never silently substitutes
+  account A for an explicitly requested B account.
+
+### Validation checkpoint
+
+- Targeted account/error regression suite: PASS, 59 tests, 0 failed.
+- Active cached quota exhaustion is rejected before subprocess launch.
+- Expired cached quota exhaustion allows the normal Codex launch path.
+- `.4` large-frame transport, account routing, sandbox, model/reasoning, and
+  service-tier behavior remain unchanged by this bounded repair.
+
+## v1.4.2-biaogu.4
+
+This bounded transport repair keeps the `1.4.2-biaogu.3` routing and
+`danger-full-access` policy unchanged while fixing false
+`CODEX_PROTOCOL_ERROR` failures during large Codex app-server events.
+
+### Codex protocol transport repair
+
+- Valid JSONL app-server frames are no longer rejected at the old 64 KiB
+  boundary. `commandExecution` events may legitimately carry large
+  `aggregatedOutput` values after repository reads, so Bridge now accepts valid
+  frames up to a defensive 16 MiB transport ceiling.
+- Incomplete/chunked JSONL frames continue to buffer until a newline completes
+  the frame. A truly overlong unterminated frame still fails closed.
+- A failed shell command remains diagnostic evidence and does not itself turn
+  an otherwise successful Codex turn into a protocol failure.
+- Unknown non-dangerous notification variants continue to be ignored unless
+  they violate the basic JSON-RPC envelope shape.
+- Traditional Chinese, emoji, multiline final output, and long final answers
+  remain UTF-8-safe.
+
+### Bounded failure diagnostics
+
+- `CODEX_PROTOCOL_ERROR` can now retain content-free protocol metadata such as
+  parser stage, event sequence, frame byte length, last method/item type,
+  terminal-frame presence, subprocess exit code, and bounded stdout/stderr
+  tail length + SHA-256.
+- Raw stdout, stderr, instructions, credentials, and response bodies are not
+  persisted in protocol diagnostics.
+- Generic execution failures and interrupted tasks keep the previous
+  no-protocol-diagnostics boundary.
+
+### Validation checkpoint
+
+- Root cause reproduced with a valid >64 KiB `commandExecution` frame before
+  the fix.
+- Targeted protocol regressions: PASS.
+- Full unit suite: 391 tests, 386 passed, 0 failed, 5 platform skips.
+- Existing Codex account/model/reasoning/service-tier routing, DSH read-only
+  behavior, controlled patches, and `danger-full-access` default remain green.
+
+## v1.4.2-biaogu.3
+
+This release keeps the Owner-approved `1.4.2-biaogu.2` Codex full-access
+execution behavior and adds an exact task-local service-tier routing dimension.
+It is the production runtime required by the 2026-09-11 GOAL role-routing split.
+
+### Task-local Codex routing
+
+- `run_task` accepts optional Codex-only `service_tier=standard|priority`.
+- An explicit tier is forwarded to native Codex app-server
+  `thread/start.serviceTier` and `turn/start.serviceTier`.
+- `task_result` and durable execution receipts preserve the explicit
+  non-secret service-tier provenance.
+- DSH rejects the Codex-only service-tier field and remains read-only.
+
+### Preserved `biaogu.2` behavior
+
+- Codex `run_task` still defaults to `danger-full-access` under the explicit
+  Owner-approved local policy, with optional narrowing to `workspace-write` or
+  `read-only`.
+- Controlled-patch proposal paths and DSH remain read-only.
+- Sandbox provenance and truthful `read_only` receipt semantics are retained.
+
+### GOAL routing policy
+
+- Engineering Bridge itself does not infer GOAL roles.
+- Machine-global / ordinary executor default remains
+  `gpt-5.6-luna / max / priority`.
+- GOAL callers pin Child A / explicit `A代理` as
+  `gpt-6-astra / low / standard`.
+- GOAL B/C/D executors pin `gpt-5.6-luna / max / priority`; task complexity no
+  longer auto-escalates executor model cost.
+
+### Validation checkpoint
+
+- TypeScript build/typecheck: PASS via `npm test`.
+- Full unit suite: 386 tests, 381 passed, 0 failed, 5 platform skips.
+- Full-access sandbox mapping and task-local service-tier forwarding are both
+  covered in the merged regression suite.
+
+## v1.4.2-biaogu.2
+
+This Owner-authorized local release removes the hard-coded read-only sandbox
+from ordinary Codex `run_task` execution while preserving the existing
+controlled-patch and DSH safety lanes.
+
+### Codex full access
+
+- Codex MCP `run_task` now defaults to native `danger-full-access`.
+- Callers may explicitly narrow a Codex task to `workspace-write` or
+  `read-only`.
+- `task_result` and the durable Bridge execution receipt report the exact
+  sandbox and truthful `read_only` value.
+- Supervisor `continue` retains the task's original sandbox.
+
+### Preserved boundaries
+
+- DSH remains pinned read-only and rejects sandbox expansion.
+- Controlled patch generation/refinement remain read-only; `AUTHORIZE` still
+  gates controlled-patch `APPLY` only.
+- No Codex auth/token payload or `CODEX_HOME` credential file is modified by
+  this release.
+- Full access does not imply Git push, I/W, production activation, or any
+  target-repository authority reserved to its Owner.
+
+### Validation checkpoint
+
+- TypeScript typecheck: PASS.
+- Full unit suite: 385 tests, 380 passed, 0 failed, 5 platform skips.
+- Native app-server mapping is covered for `danger-full-access` ->
+  `dangerFullAccess`.
+
 ## v1.4.2-biaogu.1
 
 This Biaogu integration release reconciles upstream `v1.4.2` into the current
