@@ -1,5 +1,25 @@
 # Codex Bootstrap / Memory Preflight Slimming Handoff
 
+## 2026-09-17 stale-schema compatibility repair / Owner-authorized C/P + I/W
+
+- Owner reported that Bridge -> Codex still occasionally looked like the old repeated bootstrap loop after the `.7` repair and explicitly authorized direct repair plus C/P/I/W.
+- Live Production authority was re-read before modification: runtime=`1.4.2-biaogu.7`, source branch=`fix/codex-protocol-astra-20260912`, source tip=`c4803fa1da9e2f913b76c5954f00da68ac6f4d69`. The `.7` immutable runtime remains the rollback candidate until the successor passes Canary and Production smoke.
+- Exact remaining defect: `.7` correctly added `preflight_completed / memory_required / required_skills`, and fresh MCP discovery exposes those fields, but an already-open Web ChatGPT Connector may retain the older `preflight_receipt` schema and therefore cannot send `preflight_completed=true`. In that stale-schema path the receipt still reached Bridge, but `codexBootstrapPolicy()` returned `undefined`, so native Codex memory / automatic skill instructions were not suppressed. The `.7` fix existed but could not be activated by that caller.
+- Real stale-schema reproduction on current Production `.7` used the tool surface visible to the existing ChatGPT session and a bounded `package.json` Luna/MAX/priority smoke. It completed with one file-read command, proving transport/runtime health; independently, the exposed `run_task` schema was verified to omit all three `.7` activation fields. No current `CODEX_PROTOCOL_ERROR` / `CODEX_EXECUTION_FAILED` regression was observed in the current gateway log.
+- Compatibility rule is now fail-safe and caller-version tolerant:
+  - no `preflight_receipt` => legacy no-receipt path stays byte-for-byte unchanged;
+  - valid `preflight_receipt` + omitted `preflight_completed` => treat it as a completed DS preflight and apply native `ds_preflight` bootstrap suppression;
+  - `memory_required` omitted => false, so native memories are disabled;
+  - `required_skills` omitted => no automatic skill catalogue and no required skills;
+  - explicit `preflight_completed=false` => deliberate forward-compatible opt-out preserving text-only receipt behavior.
+- This is intentionally a narrow Bridge compatibility repair. It does not mutate global `C:\Users\User\.codex\config.toml`, credentials, account routing, model/reasoning/service tier, sandbox authority, GOAL runtime, Product repos, LINE, R2, GCP, or any production product surface.
+- Validation on the isolated source Worktree:
+  - targeted stale/new-schema bootstrap regression=`10/10 PASS`;
+  - `npm run typecheck`=`PASS`;
+  - full `npm test`=`421 total / 416 pass / 0 fail / 5 skip`;
+  - existing dependency audit observation remains `2 moderate / 1 high`; no unrelated `npm audit fix` was run.
+- Release successor is `1.4.2-biaogu.8`. Promotion must remain side-by-side: immutable candidate -> Canary -> guarded Production switch -> fresh MCP + real Codex smoke. `.7` remains intact for rollback.
+
 ## 2026-09-17 Owner-approved I/W / `.7` release integration
 
 - Owner approved I/W after the feature checkpoint acceptance.

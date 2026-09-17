@@ -25,6 +25,12 @@ export const KnowledgePreflightReceiptSchema = z.object({
 
 export type KnowledgePreflightReceipt = z.infer<typeof KnowledgePreflightReceiptSchema>;
 
+export function isCompletedKnowledgePreflight(
+  receipt: KnowledgePreflightReceipt | undefined
+): receipt is KnowledgePreflightReceipt {
+  return receipt !== undefined && receipt.preflight_completed !== false;
+}
+
 export interface KnowledgePreflightExecutionBoundary {
   readonly workspaceId: string;
   readonly workspaceRoot: string;
@@ -57,7 +63,7 @@ export function attachKnowledgePreflightReceipt(
     ...bulletList(receipt.relevant_topics),
     "critical_boundaries:",
     ...bulletList(receipt.critical_boundaries),
-    ...(receipt.preflight_completed === true
+    ...(isCompletedKnowledgePreflight(receipt)
       ? [
         "bootstrap_policy:",
         `- memory: ${receipt.memory_required === true ? "required" : "skip_unless_required"}`,

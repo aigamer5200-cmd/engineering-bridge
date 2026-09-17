@@ -12,7 +12,7 @@ import {
   type CodexQuotaWindow
 } from "../executors/codex-account-router.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
-import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
+import { attachKnowledgePreflightReceipt, isCompletedKnowledgePreflight } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { ExecutionReceiptOperation } from "./execution-receipt-store.js";
 import { ExecutionReceiptStore } from "./execution-receipt-store.js";
@@ -37,7 +37,7 @@ export interface RegisteredWorkspaceTaskRequest {
 type NormalizedRegisteredWorkspaceTaskRequest = RegisteredWorkspaceTaskRequest & { readonly executor: ExecutorName };
 
 function codexBootstrapPolicy(receipt: KnowledgePreflightReceipt | undefined): CodexBootstrapPolicy | undefined {
-  if (receipt?.preflight_completed !== true) return undefined;
+  if (!isCompletedKnowledgePreflight(receipt)) return undefined;
   return {
     mode: "ds_preflight",
     memoryRequired: receipt.memory_required === true

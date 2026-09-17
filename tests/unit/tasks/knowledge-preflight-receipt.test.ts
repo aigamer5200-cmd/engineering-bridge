@@ -46,6 +46,36 @@ test("keeps legacy calls byte-for-byte unchanged when no receipt is supplied", (
   }), instruction);
 });
 
+test("receipt without the new completion flag defaults to bounded DS-preflight bootstrap", () => {
+  const rendered = attachKnowledgePreflightReceipt("Inspect only the bounded target.", receipt, {
+    workspaceId: "known",
+    workspaceRoot: "/registered/root",
+    executor: "codex",
+    sandbox: "read-only"
+  });
+
+  assert.match(rendered, /- memory: skip_unless_required/u);
+  assert.match(rendered, /- skills: explicit_only/u);
+  assert.match(rendered, /- repo_discovery: bounded/u);
+  assert.match(rendered, /- goal_autostart: false/u);
+  assert.match(rendered, /required_skills:\n- none/u);
+});
+
+test("explicit incomplete preflight keeps receipt text-only for forward-compatible callers", () => {
+  const rendered = attachKnowledgePreflightReceipt("Keep legacy bootstrap behavior.", {
+    ...receipt,
+    preflight_completed: false
+  }, {
+    workspaceId: "known",
+    workspaceRoot: "/registered/root",
+    executor: "codex",
+    sandbox: "read-only"
+  });
+
+  assert.equal(rendered.includes("bootstrap_policy:"), false);
+  assert.equal(rendered.includes("required_skills:"), false);
+});
+
 test("completed DS preflight renders bounded bootstrap policy and explicit required skills", () => {
   const rendered = attachKnowledgePreflightReceipt("Inspect only the target file.", {
     ...receipt,

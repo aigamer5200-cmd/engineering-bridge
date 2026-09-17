@@ -862,7 +862,7 @@ test("continue preserves the same native Codex thread id and passes it to the re
   assert.equal(service.taskView(taskId)?.threadId, "thread-1");
 });
 
-test("knowledge preflight receipt is injected on every turn and survives continue", async () => {
+test("legacy-schema knowledge preflight defaults to bounded bootstrap on every turn and survives continue", async () => {
   const requests: ExecutorRequest[] = [];
   const executor: Executor = {
     execute: async (request) => {
@@ -888,7 +888,11 @@ test("knowledge preflight receipt is injected on every turn and survives continu
     assert.match(request.instruction, /knowledge_base_head: 670414561cb44acfd79bc1d5e858ee814a09a240/u);
     assert.equal(request.instruction.includes(`workspace_root: ${platformRoot}`), true);
     assert.match(request.instruction, /sandbox: read-only/u);
-    assert.equal(request.bootstrap, undefined);
+    assert.deepEqual(request.bootstrap, {
+      mode: "ds_preflight",
+      memoryRequired: false
+    });
+    assert.match(request.instruction, /- goal_autostart: false/u);
   }
   assert.equal(requests[0]?.instruction.endsWith("Task instruction:\nfirst bounded task"), true);
   assert.equal(requests[1]?.instruction.endsWith("Task instruction:\nsecond bounded task"), true);
@@ -923,6 +927,30 @@ test("completed DS preflight derives a Codex-only task-local bootstrap policy", 
     memoryRequired: true
   });
   assert.match(requests[0]?.instruction ?? "", /- goal_autostart: false/u);
+});
+
+test("explicit incomplete preflight preserves text-only bootstrap compatibility", async () => {
+  const requests: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      requests.push(request);
+      return { kind: "completed", output: "done", threadId: "thread-1" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "legacy bootstrap",
+    executor: "codex",
+    preflight_receipt: {
+      ...PREFLIGHT_RECEIPT,
+      preflight_completed: false
+    }
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  assert.equal(requests[0]?.bootstrap, undefined);
+  assert.equal((requests[0]?.instruction ?? "").includes("bootstrap_policy:"), false);
 });
 
 test("DSH taskView reports executor dsh without fabricating a thread id, across continue", async () => {
