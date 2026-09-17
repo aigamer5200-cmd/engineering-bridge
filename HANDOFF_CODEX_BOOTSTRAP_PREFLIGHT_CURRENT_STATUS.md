@@ -24,6 +24,69 @@
 - Previous Production `.6` must remain intact as the rollback runtime; no
   in-place overwrite is allowed.
 
+## `.7` Production promotion and GOAL acceptance
+
+- Release checkpoint: `574d66988f59e31a87b352031e1b386ae52e34cb`.
+- Immutable runtime:
+  `D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.7`.
+- Runtime manifest validation:
+  - `npm ci` -> PASS
+  - `npm run typecheck` -> PASS
+  - `npm test` -> PASS
+  - build -> PASS via test/build pipeline
+- Canary on exact `gpt-5.6-luna / max / priority`, account A -> PASS.
+- Guarded Production switch -> PASS.
+- Current Production runtime -> `1.4.2-biaogu.7`.
+- Rollback runtime retained -> `1.4.2-biaogu.6`.
+- Post-switch Production MCP smoke -> PASS with server version `.7` and no
+  sandbox mutation.
+- Fresh Production `tools/list` exposes the new receipt fields:
+  `preflight_completed`, `memory_required`, and `required_skills`.
+- The already-open Web ChatGPT Connector session retained its older cached
+  `run_task` schema. This is a client/session schema-cache limitation rather
+  than a Production runtime mismatch; a fresh Connector session should
+  discover the `.7` schema.
+
+### Real GOAL-managed Luna/MAX smoke
+
+A clean detached smoke worktree was created from the exact `.7` release commit:
+
+```text
+worktree: D:\WORKTREE_ZONE\engineering-bridge-goal-smoke-20260917
+head: 574d66988f59e31a87b352031e1b386ae52e34cb
+GOAL session: Engineering-Bridge-20260917T044425Z-4f2d1489-8db9b9
+Bridge workspace: 51466b3a-f19c-4ec3-85a3-7fac545ad079
+Bridge task: e8ef7f3e-70ea-4b95-a795-f3a880ec59dd
+Codex thread: 01a0adae-e7fb-73e0-8329-bedc5dce7754
+route: gpt-5.6-luna / max / priority / read-only
+```
+
+DS preflight locked the task to `package.json`. The real Production `.7`
+Bridge task received `preflight_completed=true`, `memory_required=false`, and
+`required_skills=[]` and returned:
+
+```text
+VERSION=1.4.2-biaogu.7
+```
+
+Executor evidence contained exactly one command and it read only
+`package.json`. Acceptance evidence:
+
+```text
+memory_seen=false
+skills_seen=false
+goal_seen=false
+sandbox_unchanged=true
+```
+
+This closes the original repeated Memory / automatic Skills / implicit GOAL
+bootstrap failure class under real GOAL-managed Luna/MAX execution.
+
+Separate observation: bounded no-tool Luna/MAX smokes through explicit account
+A/B routes sometimes spent roughly 50-70 seconds reasoning before returning.
+Observer evidence showed no Memory, Skills, or GOAL bootstrap in those turns.
+Treat that as model/provider latency rather than reopening the bootstrap bug.
+
 ## Current checkpoint
 
 - Date: `2026-09-17`
@@ -152,9 +215,11 @@ Result successfully returned the requested first heading, proving memory-require
 
 ## Next step
 
-Create the `.7` source checkpoint, prepare a separate immutable
-`D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.7`, run Canary,
-perform the guarded Production switch only if Canary passes, verify Production,
-then record the final runtime manifest / rollback status here. A fresh Codex
-account/session can resume from this HANDOFF + repo state without relying on the
-interrupted Luna thread.
+The `.7` release, Production promotion, and real GOAL-managed bootstrap smoke
+are complete. No further bootstrap repair is required from this checkpoint.
+Future GOAL work should use normal DS-first preflight and a fresh Connector
+session when the Web UI must expose the new receipt fields. If a later task is
+slow, distinguish model/provider reasoning latency from actual Memory/Skills
+command evidence before reopening this issue. A fresh Codex account/session can
+continue from this HANDOFF + repo state without relying on any previous native
+Codex thread.

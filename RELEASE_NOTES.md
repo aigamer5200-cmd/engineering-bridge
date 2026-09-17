@@ -40,6 +40,16 @@ A/B account failover lineage.
   119 tests, 119 passed, 0 failed.
 - Real Luna/MAX feature-branch smokes previously proved both the no-memory and
   explicit-memory-required paths.
+- Immutable `.7` prepare validation passed `npm ci`, typecheck, full tests, and
+  build; Canary passed on exact `gpt-5.6-luna / max / priority`.
+- Guarded Production promotion passed with `.6` retained as the rollback
+  runtime, followed by a successful Production MCP smoke.
+- A real GOAL-managed Production smoke from the exact `.7` release commit read
+  only `package.json`, returned `VERSION=1.4.2-biaogu.7`, and recorded
+  `memory_seen=false`, `skills_seen=false`, `goal_seen=false`, with no sandbox
+  mutation.
+- An already-open Web ChatGPT Connector may retain the pre-`.7` cached tool
+  schema; fresh Production `tools/list` exposes all three new preflight fields.
 
 ## v1.4.2-biaogu.6
 
