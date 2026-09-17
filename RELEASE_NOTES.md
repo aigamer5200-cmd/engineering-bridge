@@ -1,5 +1,46 @@
 # Release notes
 
+## v1.4.2-biaogu.7
+
+This release layers the Codex bootstrap / Memory preflight slimming fix on top
+of the production-accepted `.6` transport, quota classification, and bounded
+A/B account failover lineage.
+
+### DS-preflight bootstrap policy
+
+- `KnowledgePreflightReceipt` adds optional `preflight_completed`,
+  `memory_required`, and `required_skills` fields instead of introducing a
+  second preflight system.
+- A completed DS preflight becomes a task-local native Codex bootstrap policy.
+  Automatic skill catalogue instructions are disabled with
+  `skills.include_instructions=false`.
+- When memory is not required, the task-local Codex config sets
+  `features.memories=false`; when memory is explicitly required, Bridge leaves
+  the configured memory feature untouched.
+- Existing live web-search config is merged with the bootstrap config rather
+  than replaced.
+- The rendered preflight receipt explicitly records bounded repository
+  discovery, explicit-only skills, and no implicit GOAL autostart.
+- Legacy calls without `preflight_completed=true` remain unchanged.
+
+### Preserved `.6` routing and failover behavior
+
+- Explicit A/B quota preflight, one-cycle account failover, fresh account-bound
+  native threads, mutation guards, and durable DS handoff remain intact.
+- Bootstrap policy is recomputed for the effective Codex executor on every
+  bounded execution/failover attempt, so account failover cannot silently drop
+  the DS preflight boundary.
+- Model, reasoning, service tier, sandbox, workspace, web research, and account
+  routing semantics are unchanged.
+
+### Validation checkpoint
+
+- Integrated source `npm run typecheck`: PASS.
+- Bootstrap + task-service + executor + account-failover targeted regression:
+  119 tests, 119 passed, 0 failed.
+- Real Luna/MAX feature-branch smokes previously proved both the no-memory and
+  explicit-memory-required paths.
+
 ## v1.4.2-biaogu.6
 
 This release upgrades the `.5` single-account quota guard into a bounded

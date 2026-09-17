@@ -1,5 +1,29 @@
 # Codex Bootstrap / Memory Preflight Slimming Handoff
 
+## 2026-09-17 Owner-approved I/W / `.7` release integration
+
+- Owner approved I/W after the feature checkpoint acceptance.
+- Current real Production authority was re-verified before integration:
+  `1.4.2-biaogu.6`, manifest commit
+  `862a17b803da9e8271378a08cc6cdf89a4678635`.
+- The feature was therefore **not** integrated back onto the old `.3` lineage.
+  It was cherry-picked onto the current `.6` source-authority branch
+  `fix/codex-protocol-astra-20260912` so the accepted protocol transport,
+  quota classification, and A/B failover work is preserved.
+- Feature checkpoint `cc7797a85079771a1624bbd4c142ff035e61e88a`
+  integrated as `ecef6ba` before the `.7` version checkpoint.
+- The only merge conflict was in
+  `src/tasks/registered-workspace-task-service.ts`; resolution preserved the
+  `.6` quota/failover loop and injects the task-local bootstrap policy into the
+  effective Codex execution attempt, including failover retries.
+- Integrated validation before release versioning:
+  - `npm run typecheck` -> PASS
+  - targeted bootstrap / executor / task-service / account-failover regression
+    -> `119/119 PASS`
+- Release target: `1.4.2-biaogu.7`.
+- Previous Production `.6` must remain intact as the rollback runtime; no
+  in-place overwrite is allowed.
+
 ## Current checkpoint
 
 - Date: `2026-09-17`
@@ -7,9 +31,11 @@
 - Task WT: `D:\WORKTREE_ZONE\engineering-bridge-1c7c1310`
 - Branch: `feature/codex-bootstrap-preflight-slim-20260917`
 - Production source baseline: `3cedd7442b32a99e34daba0782f7e271a7c3e1df`
-- Production runtime version observed before this change: `1.4.2-biaogu.3`
-- Production runtime was not modified or restarted in this phase.
-- I/W was not performed in this phase.
+- Production runtime version observed at the original feature start:
+  `1.4.2-biaogu.3`.
+- Later authority review before I/W established that actual current Production
+  had already advanced to `.6`; the integration section above supersedes the
+  original feature-start runtime snapshot.
 
 ## Root cause
 
@@ -113,7 +139,7 @@ Result successfully returned the requested first heading, proving memory-require
 - One read-only smoke process session was lost during DS server turnover (`Unknown process session`). The smoke was replay-safe and only the missing read-only case was rerun.
 - `npm ci` reported existing dependency audit findings (`2 moderate`, `1 high`). This phase did not run `npm audit fix` because dependency remediation is unrelated to the bootstrap fix.
 
-## Safety / do-not-touch boundary preserved
+## Safety / do-not-touch boundary preserved during feature implementation
 
 - no global `C:\Users\User\.codex\config.toml` mutation
 - no permanent `.codex/config.toml` project override
@@ -121,10 +147,14 @@ Result successfully returned the requested first heading, proving memory-require
 - no Shoestring GOAL runtime implementation change
 - no account credential / token / auth file change
 - no product repo / LINE / R2 / GCP / card-generation change
-- no I/W
+- no I/W occurred before Owner acceptance; the later Owner-approved I/W is
+  recorded in the integration section above
 
 ## Next step
 
-After this feature branch is committed and pushed, the next step is review / acceptance of this checkpoint.
-
-Only after acceptance should I/W be considered against the current Bridge / GOAL integration authority. A fresh Codex account/session can resume from this HANDOFF + branch state without relying on the interrupted Luna thread.
+Create the `.7` source checkpoint, prepare a separate immutable
+`D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.7`, run Canary,
+perform the guarded Production switch only if Canary passes, verify Production,
+then record the final runtime manifest / rollback status here. A fresh Codex
+account/session can resume from this HANDOFF + repo state without relying on the
+interrupted Luna thread.
