@@ -46,6 +46,43 @@ test("keeps legacy calls byte-for-byte unchanged when no receipt is supplied", (
   }), instruction);
 });
 
+test("completed DS preflight renders bounded bootstrap policy and explicit required skills", () => {
+  const rendered = attachKnowledgePreflightReceipt("Inspect only the target file.", {
+    ...receipt,
+    preflight_completed: true,
+    memory_required: false,
+    required_skills: ["repo-safety-handoff"]
+  }, {
+    workspaceId: "known",
+    workspaceRoot: "/registered/root",
+    executor: "codex",
+    sandbox: "read-only"
+  });
+
+  assert.match(rendered, /- memory: skip_unless_required/u);
+  assert.match(rendered, /- skills: explicit_only/u);
+  assert.match(rendered, /- repo_discovery: bounded/u);
+  assert.match(rendered, /- goal_autostart: false/u);
+  assert.match(rendered, /required_skills:\n- repo-safety-handoff/u);
+});
+
+test("completed DS preflight can explicitly require memory while allowing no skills", () => {
+  const rendered = attachKnowledgePreflightReceipt("Use the requested memory context.", {
+    ...receipt,
+    preflight_completed: true,
+    memory_required: true,
+    required_skills: []
+  }, {
+    workspaceId: "known",
+    workspaceRoot: "/registered/root",
+    executor: "codex",
+    sandbox: "read-only"
+  });
+
+  assert.match(rendered, /- memory: required/u);
+  assert.match(rendered, /required_skills:\n- none/u);
+});
+
 test("schema rejects multiline metadata, oversized lists, and non-SHA knowledge heads", () => {
   assert.equal(KnowledgePreflightReceiptSchema.safeParse({
     ...receipt,

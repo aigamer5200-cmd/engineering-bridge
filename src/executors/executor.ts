@@ -6,6 +6,10 @@ import type { SerializedError } from "../core/errors.js";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type ServiceTier = "standard" | "priority";
+export interface CodexBootstrapPolicy {
+  readonly mode: "ds_preflight";
+  readonly memoryRequired: boolean;
+}
 
 export interface EvidenceChange { readonly path: string; readonly diff: string }
 export interface ExecutorEvidence {
@@ -31,6 +35,8 @@ export interface ExecutorRequest {
   readonly account?: string;
   /** Enables the first-party Codex live web-search tool only. */
   readonly webSearch?: "live";
+  /** Internal task-local Codex bootstrap override derived from a completed DS preflight receipt. */
+  readonly bootstrap?: CodexBootstrapPolicy;
   readonly threadId?: string | undefined;
   readonly onEvidence?: (evidence: readonly ExecutorEvidence[]) => void;
 }

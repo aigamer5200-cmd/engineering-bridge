@@ -7,6 +7,7 @@ const singleLine = z.string()
   .refine((value) => !/[\r\n]/u.test(value), "must be a single line");
 
 const boundedList = z.array(singleLine).min(1).max(32);
+const boundedOptionalList = z.array(singleLine).max(32);
 
 export const KnowledgePreflightReceiptSchema = z.object({
   knowledge_base_path: singleLine,
@@ -16,7 +17,10 @@ export const KnowledgePreflightReceiptSchema = z.object({
   goal_summary: singleLine,
   acceptance_criteria: boundedList,
   relevant_topics: boundedList,
-  critical_boundaries: boundedList
+  critical_boundaries: boundedList,
+  preflight_completed: z.boolean().optional(),
+  memory_required: z.boolean().optional(),
+  required_skills: boundedOptionalList.optional()
 }).strict();
 
 export type KnowledgePreflightReceipt = z.infer<typeof KnowledgePreflightReceiptSchema>;
@@ -53,6 +57,17 @@ export function attachKnowledgePreflightReceipt(
     ...bulletList(receipt.relevant_topics),
     "critical_boundaries:",
     ...bulletList(receipt.critical_boundaries),
+    ...(receipt.preflight_completed === true
+      ? [
+        "bootstrap_policy:",
+        `- memory: ${receipt.memory_required === true ? "required" : "skip_unless_required"}`,
+        "- skills: explicit_only",
+        "- repo_discovery: bounded",
+        "- goal_autostart: false",
+        "required_skills:",
+        ...(receipt.required_skills?.length ? bulletList(receipt.required_skills) : ["- none"])
+      ]
+      : []),
     "exact_execution_boundary:",
     `- workspace_id: ${boundary.workspaceId}`,
     `- workspace_root: ${boundary.workspaceRoot}`,

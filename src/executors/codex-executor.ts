@@ -458,9 +458,15 @@ export class CodexExecutor implements Executor {
       const sandbox = request.sandbox ?? "read-only";
       const threadParams: Record<string, unknown> = { cwd: this.workspaceRoot, approvalPolicy: "never", sandbox };
       if (request.service_tier !== undefined) threadParams.serviceTier = request.service_tier;
-      if (request.webSearch === "live") {
-        threadParams.config = { web_search: "live" };
+      const threadConfig: Record<string, unknown> = {};
+      if (request.webSearch === "live") threadConfig.web_search = "live";
+      if (request.bootstrap?.mode === "ds_preflight") {
+        threadConfig.skills = { include_instructions: false };
+        if (!request.bootstrap.memoryRequired) {
+          threadConfig.features = { memories: false };
+        }
       }
+      if (Object.keys(threadConfig).length > 0) threadParams.config = threadConfig;
       if (request.threadId) threadParams.threadId = request.threadId;
       const threadResult = await this.call(request.threadId ? "thread/resume" : "thread/start", threadParams);
       if (!object(threadResult) || !object(threadResult.thread) || typeof threadResult.thread.id !== "string") throw new Error();

@@ -3,7 +3,7 @@ import { serializeError } from "../core/errors.js";
 import type { Id } from "../core/ids.js";
 import type { SerializedError } from "../core/errors.js";
 import { CoreError } from "../core/errors.js";
-import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort, SandboxMode, ServiceTier } from "../executors/executor.js";
+import type { CodexBootstrapPolicy, Executor, ExecutorDiagnostics, ExecutorEvidence, ReasoningEffort, SandboxMode, ServiceTier } from "../executors/executor.js";
 import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
 import { attachKnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
 import type { KnowledgePreflightReceipt } from "./knowledge-preflight-receipt.js";
@@ -28,6 +28,14 @@ export interface RegisteredWorkspaceTaskRequest {
 }
 
 type NormalizedRegisteredWorkspaceTaskRequest = RegisteredWorkspaceTaskRequest & { readonly executor: ExecutorName };
+
+function codexBootstrapPolicy(receipt: KnowledgePreflightReceipt | undefined): CodexBootstrapPolicy | undefined {
+  if (receipt?.preflight_completed !== true) return undefined;
+  return {
+    mode: "ds_preflight",
+    memoryRequired: receipt.memory_required === true
+  };
+}
 
 function normalizeTaskRequest(request: RegisteredWorkspaceTaskRequest): NormalizedRegisteredWorkspaceTaskRequest {
   const executor = request.executor ?? "codex";
@@ -404,8 +412,12 @@ export class RegisteredWorkspaceTaskService {
         executor: record.request.executor,
         sandbox: record.request.sandbox ?? "read-only"
       });
+      const bootstrap = record.request.executor === "codex"
+        ? codexBootstrapPolicy(record.request.preflight_receipt)
+        : undefined;
       const result = await executor.execute({ taskId, instruction,
         sandbox: record.request.sandbox ?? "read-only",
+        ...(bootstrap === undefined ? {} : { bootstrap }),
         ...(record.threadId !== undefined ? { threadId: record.threadId } : {}),
         ...(record.request.model !== undefined ? { model: record.request.model } : {}),
         ...(record.request.reasoning !== undefined ? { reasoning: record.request.reasoning } : {}),
@@ -480,12 +492,16 @@ export class RegisteredWorkspaceTaskService {
         executor: request.executor,
         sandbox: request.sandbox ?? "read-only"
       });
+      const bootstrap = request.executor === "codex"
+        ? codexBootstrapPolicy(request.preflight_receipt)
+        : undefined;
       const result = await executor.execute(
         this.observer === undefined
           ? {
             taskId,
             instruction,
             ...(request.sandbox === undefined ? {} : { sandbox: request.sandbox }),
+            ...(bootstrap === undefined ? {} : { bootstrap }),
             ...(request.model !== undefined ? { model: request.model } : {}),
             ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
             ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),
@@ -497,6 +513,7 @@ export class RegisteredWorkspaceTaskService {
             taskId,
             instruction,
             ...(request.sandbox === undefined ? {} : { sandbox: request.sandbox }),
+            ...(bootstrap === undefined ? {} : { bootstrap }),
             ...(request.model !== undefined ? { model: request.model } : {}),
             ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
             ...(request.reasoning_effort !== undefined ? { reasoning_effort: request.reasoning_effort } : {}),

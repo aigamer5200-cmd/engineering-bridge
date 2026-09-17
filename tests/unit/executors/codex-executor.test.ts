@@ -427,6 +427,44 @@ test("live web research enables native web_search without enabling OS network", 
   assert.equal(turnStart.params.sandboxPolicy.networkAccess, false);
 });
 
+test("DS-preflight bootstrap disables memory and automatic skill instructions while merging web search", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "bounded answer" }, invocations));
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "inspect bounded files",
+    webSearch: "live",
+    bootstrap: { mode: "ds_preflight", memoryRequired: false }
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  assert.deepEqual(threadStart.params.config, {
+    web_search: "live",
+    skills: { include_instructions: false },
+    features: { memories: false }
+  });
+});
+
+test("DS-preflight memory-required bootstrap preserves configured memory while keeping skills explicit-only", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "memory answer" }, invocations));
+  const result = await executor.execute({
+    taskId: TASK_ID,
+    instruction: "use required memory",
+    bootstrap: { mode: "ds_preflight", memoryRequired: true }
+  });
+
+  assert.equal(result.kind, "completed");
+  const messages = invocations[0]!.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const threadStart = messages.find((message: { method?: string }) => message.method === "thread/start");
+  assert.deepEqual(threadStart.params.config, {
+    skills: { include_instructions: false }
+  });
+  assert.equal("features" in threadStart.params.config, false);
+});
+
 test("legacy reasoning alias is validated and sent as the upstream turn effort", async () => {
   const invocations: Invocation[] = [];
   const executor = timedExecutor(fakeStarter({
