@@ -888,11 +888,41 @@ test("knowledge preflight receipt is injected on every turn and survives continu
     assert.match(request.instruction, /knowledge_base_head: 670414561cb44acfd79bc1d5e858ee814a09a240/u);
     assert.equal(request.instruction.includes(`workspace_root: ${platformRoot}`), true);
     assert.match(request.instruction, /sandbox: read-only/u);
+    assert.equal(request.bootstrap, undefined);
   }
   assert.equal(requests[0]?.instruction.endsWith("Task instruction:\nfirst bounded task"), true);
   assert.equal(requests[1]?.instruction.endsWith("Task instruction:\nsecond bounded task"), true);
   assert.equal(requests[1]?.instruction.includes("Task instruction:\nfirst bounded task"), false);
   assert.deepEqual(requests.map(({ threadId }) => threadId), [undefined, "thread-1"]);
+});
+
+test("completed DS preflight derives a Codex-only task-local bootstrap policy", async () => {
+  const requests: ExecutorRequest[] = [];
+  const executor: Executor = {
+    execute: async (request) => {
+      requests.push(request);
+      return { kind: "completed", output: "done", threadId: "thread-1" };
+    }
+  };
+  const service = new RegisteredWorkspaceTaskService(registry(), () => executor);
+  const { taskId } = service.startTask({
+    workspace_id: "known",
+    instruction: "bounded implementation",
+    executor: "codex",
+    preflight_receipt: {
+      ...PREFLIGHT_RECEIPT,
+      preflight_completed: true,
+      memory_required: true,
+      required_skills: []
+    }
+  });
+  await waitForInteractiveReady(service, taskId);
+
+  assert.deepEqual(requests[0]?.bootstrap, {
+    mode: "ds_preflight",
+    memoryRequired: true
+  });
+  assert.match(requests[0]?.instruction ?? "", /- goal_autostart: false/u);
 });
 
 test("DSH taskView reports executor dsh without fabricating a thread id, across continue", async () => {
