@@ -1,5 +1,33 @@
 # Release notes
 
+## v1.4.2-biaogu.8
+
+This release makes the `.7` DS-preflight bootstrap suppression compatible with
+already-open ChatGPT Connector sessions that still expose the older
+`preflight_receipt` schema.
+
+### Cached-schema compatibility
+
+- A valid `KnowledgePreflightReceipt` now means DS preflight is complete by
+  default even when the caller cannot send the newer `preflight_completed`
+  field.
+- The stale-schema path therefore receives the same native Codex bootstrap
+  protection as a fresh `.7` caller: automatic skill catalogue instructions
+  are disabled and native memories are disabled unless explicitly required.
+- Calls with no preflight receipt remain byte-for-byte legacy-compatible.
+- Future callers may explicitly send `preflight_completed=false` to preserve a
+  text-only receipt without native bootstrap suppression.
+- Account routing, model/reasoning/service tier, sandbox, failover, protocol
+  transport, and GOAL authority are unchanged.
+
+### Validation checkpoint
+
+- Targeted stale/new-schema bootstrap regression: 10 passed, 0 failed.
+- `npm run typecheck`: PASS.
+- Full `npm test`: 421 total, 416 passed, 0 failed, 5 skipped.
+- No global Codex config, credential, account, GOAL, Product, LINE, R2, or GCP
+  mutation is part of this release.
+
 ## v1.4.2-biaogu.7
 
 This release layers the Codex bootstrap / Memory preflight slimming fix on top
