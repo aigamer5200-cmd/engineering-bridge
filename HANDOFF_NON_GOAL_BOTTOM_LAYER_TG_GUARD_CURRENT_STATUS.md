@@ -1,6 +1,6 @@
 # HANDOFF — Engineering Bridge Non-GOAL Bottom-Layer TG Guard
 
-status = SOURCE_FEATURE_READY_FOR_OWNER_ACCEPTANCE
+status = INTEGRATED_MAIN_AWAITING_PRODUCTION_ACTIVATION
 
 date = 2026-09-18
 
@@ -10,6 +10,7 @@ date = 2026-09-18
 - branch: `feature/non-goal-tg-runtime`
 - base: `origin/main@37d4b44cc999f9e9f44b6844b9b74fc7f4be621d`
 - checkpoint ref: `refs/heads/feature/non-goal-tg-runtime` (this phase-complete C/P)
+- integrated source commit: `922ac45d1bdadf62e58860eab3ba9d7936cc56f1`
 - candidate version: `1.4.2-biaogu.9`
 
 ## Implemented
@@ -70,17 +71,18 @@ suppression, and activation/rollback contract.
 - no production guard environment profile;
 - no Bridge MCP restart/reconnect;
 - no Codex account/auth/profile mutation;
-- no I/W.
 
 ## Next gate
 
-After Owner acceptance and explicit I/W/activation authorization:
+Source I/W is complete and full main regression passed. Production activation
+remains a separate explicit Owner authorization.
 
-1. integrate Shoestring + Bridge feature checkpoints;
-2. prepare immutable Bridge `1.4.2-biaogu.9`;
-3. install the non-secret guard runtime profile in the external Bridge wrapper;
-4. enable DevSpace guarded mode through its production config;
-5. controlled restart/reconnect the affected MCP channels;
-6. run live DS, DS+Codex, explicit-stop, lease-expiry, and GOAL no-duplicate
+After authorized production activation:
+
+1. prepare immutable Bridge `1.4.2-biaogu.9`;
+2. install the non-secret guard runtime profile in the external Bridge wrapper;
+3. enable DevSpace guarded mode through its production config;
+4. controlled restart/reconnect the affected MCP channels;
+5. run live DS, DS+Codex, explicit-stop, lease-expiry, and GOAL no-duplicate
    canaries;
-7. rollback the optional module if any canary fails.
+6. rollback the optional module if any canary fails.
