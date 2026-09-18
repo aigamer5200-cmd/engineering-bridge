@@ -33,6 +33,7 @@ test("exposes the executor error codes", () => {
     "DSH_PROTOCOL_ERROR",
     "DSH_EXECUTION_FAILED",
     "TASK_INTERRUPTED",
+    "DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE",
     "UNSUPPORTED_ACTION"
   ]);
   assert.deepEqual(serializeError(new CoreError("CODEX_UNAVAILABLE")), {
@@ -59,6 +60,10 @@ test("exposes the executor error codes", () => {
   });
   assert.deepEqual(serializeError(new CoreError("TASK_INTERRUPTED")), {
     code: "TASK_INTERRUPTED", message: "The task was interrupted."
+  });
+  assert.deepEqual(serializeError(new CoreError("DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE")), {
+    code: "DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE",
+    message: "The required development execution guard is unavailable."
   });
   assert.deepEqual(serializeError(new CoreError("UNSUPPORTED_ACTION")), {
     code: "UNSUPPORTED_ACTION", message: "The requested action is not supported."

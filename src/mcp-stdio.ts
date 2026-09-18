@@ -11,6 +11,10 @@ import { CodexExecutor } from "./executors/codex-executor.js";
 import { DshExecutor } from "./executors/dsh-executor.js";
 import { VERSION } from "./version.js";
 import { CoreError, serializeError } from "./core/errors.js";
+import {
+  DevelopmentExecutionGuardClient,
+  DevelopmentExecutionGuardSupervisor
+} from "./core/development-execution-guard-client.js";
 import { RegisteredWorkspaceTaskService } from "./tasks/registered-workspace-task-service.js";
 import { ExecutionReceiptStore } from "./tasks/execution-receipt-store.js";
 import { ControlledPatchService } from "./tasks/controlled-patch-service.js";
@@ -143,6 +147,11 @@ async function main(): Promise<void> {
     executionReceipts,
     observer
   );
+  const developmentGuard = DevelopmentExecutionGuardClient.fromEnvironment();
+  const developmentGuardSupervisor = new DevelopmentExecutionGuardSupervisor(
+    developmentGuard,
+    (taskId) => service.taskView(taskId)?.state
+  );
   const controlledPatches = new ControlledPatchService(
     registry,
     service,
@@ -177,7 +186,7 @@ async function main(): Promise<void> {
       sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
       preflight_receipt: KnowledgePreflightReceiptSchema.optional()
     }
-  }, ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, service_tier, account, web_research, sandbox, preflight_receipt }) => {
+  }, async ({ workspace_id, instruction, executor, model, reasoning, reasoning_effort, service_tier, account, web_research, sandbox, preflight_receipt }) => {
     try {
       if (reasoning !== undefined && reasoning_effort !== undefined) {
         throw new CoreError("UNSUPPORTED_ACTION");
@@ -191,6 +200,15 @@ async function main(): Promise<void> {
         throw new CoreError("UNSUPPORTED_ACTION");
       }
       const effectiveSandbox = sandbox ?? (executor === "codex" ? "danger-full-access" : "read-only");
+      let workspaceRoot: string | undefined;
+      try {
+        workspaceRoot = registry.resolve(workspace_id);
+      } catch (error) {
+        if (!(error instanceof CoreError) || error.code !== "UNKNOWN_WORKSPACE") throw error;
+      }
+      if (workspaceRoot !== undefined && !await developmentGuardSupervisor.beforeTask(workspaceRoot)) {
+        throw new CoreError("DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE");
+      }
       const { taskId } = service.startTask({
         workspace_id,
         instruction,
@@ -204,6 +222,9 @@ async function main(): Promise<void> {
         sandbox: effectiveSandbox,
         ...(preflight_receipt === undefined ? {} : { preflight_receipt })
       });
+      if (workspaceRoot !== undefined) {
+        developmentGuardSupervisor.start(taskId, workspaceRoot);
+      }
       return jsonContent({ task_id: taskId });
     } catch (error) {
       return { isError: true, ...jsonContent({ error: serializeError(error) }) };
@@ -287,6 +308,38 @@ async function main(): Promise<void> {
         serialized_task_view_bytes: Buffer.byteLength(JSON.stringify(taskView), "utf8")
       }
     });
+  });
+
+  server.registerTool("notify_development_stop", {
+    description: "Send one fail-closed non-GOAL development-stop Telegram notification for a registered workspace. This tool is notification-only and does not grant or change workspace, Codex, GOAL, repository write, C/P, I/W, deploy, production, or Human-Gate authority.",
+    inputSchema: {
+      workspace_id: z.string().min(1),
+      event_id: z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/),
+      kind: z.enum(["completed", "interrupted", "blocked", "waiting", "paused"]),
+      reason_zh: z.string().min(1).max(500)
+    }
+  }, async ({ workspace_id, event_id, kind, reason_zh }) => {
+    try {
+      const workspaceRoot = registry.resolve(workspace_id);
+      const result = await developmentGuard.stop({
+        workspaceRoot,
+        eventId: event_id,
+        kind,
+        reasonZh: reason_zh
+      });
+      if (!result.ok) {
+        throw new CoreError("DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE");
+      }
+      return jsonContent({
+        workspace_id,
+        event_id,
+        notification_only: true,
+        delivered: true,
+        ...(result.payload === undefined ? {} : { receipt: result.payload })
+      });
+    } catch (error) {
+      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+    }
   });
 
   server.registerTool("control_task", {

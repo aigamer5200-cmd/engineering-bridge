@@ -88,6 +88,7 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
       "control_task",
       "create_project",
       "generate_controlled_patch",
+      "notify_development_stop",
       "refine_controlled_patch",
       "run_task",
       "submit_controlled_patch",
@@ -115,6 +116,10 @@ test("MCP and Codex client metadata use the shared package VERSION, and stdio re
     assert.equal(typeof runTaskProperties?.preflight_receipt, "object");
     assert.equal(typeof schemas.get("generate_controlled_patch")?.properties?.preflight_receipt, "object");
     assert.equal(typeof schemas.get("refine_controlled_patch")?.properties?.preflight_receipt, "object");
+    const notifyProperties = schemas.get("notify_development_stop")?.properties;
+    for (const field of ["workspace_id", "event_id", "kind", "reason_zh"]) {
+      assert.equal(typeof notifyProperties?.[field], "object");
+    }
 
     // COMMIT requires every field and the exact literal confirmation.
     const commitSchema = schemas.get("commit_controlled_patch");

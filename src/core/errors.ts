@@ -27,6 +27,7 @@ export const ERROR_CODES = [
   "DSH_PROTOCOL_ERROR",
   "DSH_EXECUTION_FAILED",
   "TASK_INTERRUPTED",
+  "DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE",
   "UNSUPPORTED_ACTION"
 ] as const;
 
@@ -66,6 +67,7 @@ const ERROR_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   DSH_PROTOCOL_ERROR: "DSH returned an invalid response.",
   DSH_EXECUTION_FAILED: "DSH execution failed.",
   TASK_INTERRUPTED: "The task was interrupted.",
+  DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE: "The required development execution guard is unavailable.",
   UNSUPPORTED_ACTION: "The requested action is not supported."
 };
 

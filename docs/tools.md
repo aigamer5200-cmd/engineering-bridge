@@ -1,6 +1,6 @@
 # MCP tool reference
 
-This is the tool surface of Engineering Bridge V1 (1.4.2). The local STDIO MCP server exposes thirteen tools.
+This is the tool surface of Engineering Bridge V1 (1.4.2). The local STDIO MCP server exposes fourteen tools.
 
 ## `run_task`
 
@@ -20,6 +20,24 @@ Conditional fields:
 - `partial_output`: present only when a genuine interrupt produced real partial output (for example, DSH cached partial stdout or the last completed Codex agent message). The task state is still `failed`; `partial_output` is never completed `output` and never appears in `error`.
 
 `evidence` contains bounded command-execution and file-change items. When the existing bounds truncate or evict evidence, explicit markers are returned: strings cut by the size bound end with `[truncated]`, an oversized changes list gains a `[truncated: N additional changes omitted]` entry, and evidence evicted by the total count limit is reported through a synthetic `evidence-drop` item. These markers mean the diagnostic information is incomplete.
+
+## `notify_development_stop`
+
+Inputs: `workspace_id`, stable `event_id`, `kind`
+(`completed | interrupted | blocked | waiting | paused`), and short Traditional
+Chinese `reason_zh`.
+
+This is a **notification-only** non-GOAL stop tool. When the optional
+Development Execution Guard is enabled, Bridge resolves the registered
+workspace and delegates to the shared Shoestring guard. Success requires the
+guard/helper path to return a validated delivered receipt. Failure to obtain
+delivery is returned as an MCP error; it is never reinterpreted as a successful
+stop.
+
+The tool does not change workspace registration, Codex routing/account/auth,
+GOAL state, repository write permission, controlled-patch authority, C/P, I/W,
+deploy, production, or Human-Gate state. A GOAL-owned worktree is rejected by
+the shared guard and must use the GOAL runtime notification path instead.
 
 ## `control_task`
 

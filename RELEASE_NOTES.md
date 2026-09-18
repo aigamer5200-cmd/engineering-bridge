@@ -1,5 +1,42 @@
 # Release notes
 
+## v1.4.2-biaogu.9
+
+This release adds the Bridge half of the non-GOAL bottom-layer development
+execution Telegram guard. It is intentionally modular and disabled unless the
+sanctioned runtime profile enables it.
+
+### Development Execution Guard
+
+- `run_task` for a registered workspace performs a fail-closed guard heartbeat
+  before task creation when the module is enabled.
+- queued/running tasks renew the same shared worktree lease; once a child task
+  leaves those states, Bridge shortens the lease to a terminal grace period
+  instead of assuming the user-visible development task has stopped.
+- the new `notify_development_stop` MCP tool is notification-only and requires
+  a stable event id plus delivered guard receipt.
+- GOAL/workspace/write/C/P/I/W/deploy/production authority is unchanged.
+- guard-disabled behavior does not spawn a helper and preserves the pre-.9
+  Bridge path.
+- unknown workspace IDs keep the existing asynchronous failure contract and do
+  not launch an executor.
+
+### Runtime profile
+
+The module reads only the explicit
+`ENGINEERING_BRIDGE_DEVELOPMENT_GUARD*` environment profile. The canonical
+helper and durable lease state live in the Shoestring GOAL installation and
+`D:\ShoestringGoalData`, respectively. Codex account/auth/profile state is
+not read or modified.
+
+### Validation checkpoint
+
+- `npm run typecheck`: PASS.
+- focused guard/error/MCP regression: 19 passed, 0 failed.
+- full `npm test`: 425 total, 420 passed, 0 failed, 5 skipped.
+- no production runtime/profile change, MCP restart/reconnect, Codex
+  account/auth/profile mutation, or I/W is part of this source checkpoint.
+
 ## v1.4.2-biaogu.8
 
 This release makes the `.7` DS-preflight bootstrap suppression compatible with
