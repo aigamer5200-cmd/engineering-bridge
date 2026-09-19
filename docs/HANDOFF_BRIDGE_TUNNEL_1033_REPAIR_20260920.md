@@ -55,6 +55,20 @@ This was not a Cloudflare Tunnel credential, hostname route, OAuth architecture,
 
 The remaining check is ChatGPT UI OAuth refresh/reconnect behavior. Owner should use Engineering Bridge `重新連線` if needed and then the plugin-page `重新整理`. Expected result: no Cloudflare Error 1033, connection completes, and the refreshed schema remains 14 tools including `notify_development_stop`.
 
+## 2026-09-20 active BAT hardening follow-up
+
+- Active Windows BAT hardening checkpoint: `4f185fa9c194229e27e423c7298fb8571f124b61` (`fix: harden active windows bat controls`).
+- Root/control/DevSpace/runtime audit covered 43 active/user-facing BAT files. Historical version snapshots, canary/staging artifacts, and `.venv` BAT files were intentionally left immutable.
+- Canonical recovery/startup BAT copies and deployed `D:\Engineering_Bridge_System\control` copies were verified line-for-line equal for the six critical files.
+- Full repo regression after BAT hardening: 425 tests, 420 pass, 0 fail, 5 skipped.
+- Post-restart MCP schema check: 14 tools, including `notify_development_stop`.
+- Post-restart Bridge read-only Codex smoke:
+  - task id `0786b68b-f0fb-49ce-ae3f-4b57220ffd6f`
+  - native Codex thread created successfully
+  - final output: `READY 574d66988f59e31a87b352031e1b386ae52e34cb`
+  - task accepted to `completed`
+- The public OAuth health gate continued to return HTTP 200 after the live Bridge restart.
+
 ## Boundaries preserved
 
 - No 飆股獵人 GCP / Scheduler / Cloud Run / R2 / card / Production mutation.
