@@ -13,6 +13,6 @@ if exist "%PID_FILE%" (
 )
 
 start "Engineering Recovery Watchdog" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%SCRIPT%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; 1..20 | ForEach-Object { if(Test-Path '%PID_FILE%'){$ok=$true; break}; Start-Sleep -Milliseconds 250 }; if($ok){exit 0}else{exit 1}"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; 1..20 | ForEach-Object { if(Test-Path '%PID_FILE%'){ $id=(Get-Content '%PID_FILE%' | Select-Object -First 1).Trim(); if($id -match '^\d+$'){ $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$id) -ErrorAction SilentlyContinue; if($p -and ([string]$p.CommandLine -match 'engineering_recovery_watchdog\.ps1')){$ok=$true; break} } }; Start-Sleep -Milliseconds 250 }; if($ok){exit 0}else{exit 1}"
 if errorlevel 1 exit /b 51
 exit /b 0

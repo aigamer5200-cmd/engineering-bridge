@@ -12,7 +12,11 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 - Three consecutive repairable failures are required before automatic recovery.
 - Unexpected processes owning a managed port are fail-closed: Recovery logs the condition and does not kill the process.
 - Missing DevSpace listeners reuse `START_DS_CHANNEL.bat`; an HTTP-unresponsive DevSpace uses `RESTART_DS_CHANNEL.bat`. Bridge recovery reuses `RESTART_BRIDGE_CHANNEL.bat`.
-- `START_DS_CHANNEL.bat` is tracked here as the canonical deployed launcher because its owner check must stay aligned with the guarded-production runtime.
+- The critical deployed BAT surface is tracked here as canonical recovery/startup source: `START_ALL_CHANNELS.bat`, `START_DS_CHANNEL.bat`, `STOP_DS_CHANNEL.bat`, `START_BRIDGE_CHANNEL.bat`, `CHECK_CHANNELS.bat`, and `START_RECOVERY_WATCHDOG.bat`.
+- `START_DS_CHANNEL.bat` accepts both valid DevSpace owner models, requires a real local HTTP response, and verifies the DevSpace Cloudflared Windows service before returning success.
+- Once Bridge public auth is provisioned, `START_BRIDGE_CHANNEL.bat` fails closed if the dedicated tunnel runner/token is missing and requires both the local OAuth metadata endpoint and public OAuth metadata endpoint to be healthy before returning success.
+- `CHECK_CHANNELS.bat` is no longer a port-presence-only display. It validates expected listener ownership, local HTTP/OAuth health, public Bridge OAuth health, Cloudflared service state, tunnel metrics ownership, and the Recovery Watchdog process, and returns nonzero on a failed required component.
+- `START_RECOVERY_WATCHDOG.bat` verifies that the PID file resolves to the expected watchdog process instead of treating PID-file creation alone as readiness.
 - Recovery waits only for the immediate control BAT wrapper to return. It deliberately does **not** use PowerShell `Start-Process -Wait`, because that can wait for the long-running DevSpace `node.exe` descendant and deadlock the watchdog after a successful restart.
 - Successful automatic service recovery writes `runtime\recovery-handoff.txt` and `runtime\recovery-state.json`, then opens a fresh ChatGPT browser window and copies the handoff text to the clipboard.
 - A recovered Bridge task/thread is considered stale. The next ChatGPT window must start a fresh `run_task`; that creates a new native Codex thread instead of resuming an old Bridge task id.
