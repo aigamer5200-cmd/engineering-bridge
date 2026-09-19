@@ -70,8 +70,9 @@ function Get-DsHealth {
     }
 
     $command = [string]$process.CommandLine
-    if (($process.Name -ne "node.exe") -or
-        ($command -notmatch "DevSpace\\versions\\[^\\]+\\node_modules\\@waishnav\\devspace\\dist\\cli\.js serve")) {
+    $isDirectCli = $command -match "DevSpace\\versions\\[^\\]+\\node_modules\\@waishnav\\devspace\\dist\\cli\.js serve"
+    $isGuardProxy = $command -match "DevSpace\\devspace_development_guard_proxy\.mjs"
+    if (($process.Name -ne "node.exe") -or (-not ($isDirectCli -or $isGuardProxy))) {
         return [pscustomobject]@{ Healthy = $false; Repairable = $false; Reason = "unexpected-owner:$($process.ProcessId):$($process.Name)" }
     }
 

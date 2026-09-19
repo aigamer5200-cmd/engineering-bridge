@@ -7,10 +7,12 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 ## Runtime behavior
 
 - The watchdog checks DevSpace on port `7677` and Engineering Bridge on `8768` every 15 seconds.
+- DevSpace `7677` may be owned either by the legacy direct `@waishnav/devspace` CLI process or by the guarded-production `devspace_development_guard_proxy.mjs`. Both are expected production owners; any other listener still fails closed.
 - Health requires the expected listener owner plus a real local HTTP response. Bridge public tunnel health is also checked through the dedicated `20242` cloudflared metrics listener when public auth is enabled.
 - Three consecutive repairable failures are required before automatic recovery.
 - Unexpected processes owning a managed port are fail-closed: Recovery logs the condition and does not kill the process.
 - Missing DevSpace listeners reuse `START_DS_CHANNEL.bat`; an HTTP-unresponsive DevSpace uses `RESTART_DS_CHANNEL.bat`. Bridge recovery reuses `RESTART_BRIDGE_CHANNEL.bat`.
+- `START_DS_CHANNEL.bat` is tracked here as the canonical deployed launcher because its owner check must stay aligned with the guarded-production runtime.
 - Recovery waits only for the immediate control BAT wrapper to return. It deliberately does **not** use PowerShell `Start-Process -Wait`, because that can wait for the long-running DevSpace `node.exe` descendant and deadlock the watchdog after a successful restart.
 - Successful automatic service recovery writes `runtime\recovery-handoff.txt` and `runtime\recovery-state.json`, then opens a fresh ChatGPT browser window and copies the handoff text to the clipboard.
 - A recovered Bridge task/thread is considered stale. The next ChatGPT window must start a fresh `run_task`; that creates a new native Codex thread instead of resuming an old Bridge task id.
