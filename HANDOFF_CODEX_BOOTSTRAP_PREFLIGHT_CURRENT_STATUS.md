@@ -1,5 +1,55 @@
 # Codex Bootstrap / Memory Preflight Slimming Handoff
 
+## 2026-09-21 `.10` Owner-authorized I/W and Production acceptance
+
+- Owner explicitly authorized I/W for the GOAL missing-preflight-receipt guard.
+- Feature checkpoint `13cb1f2a4ce6d99affff2b567db182886d2cce8a` was integrated into canonical
+  `main` as `999f3f9042d1bd74790ba9aacd3bbd1fd54e5e3a`.
+- Release checkpoint `921be9b07799d9ee9c41b4d397fd48b85e1b8105` bumped the Bridge package to
+  `1.4.2-biaogu.10`, updated release notes, and was pushed to `origin/main`.
+- Immutable runtime preparation PASS:
+  - root: `D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.10`
+  - commit: `921be9b07799d9ee9c41b4d397fd48b85e1b8105`
+  - package-lock SHA256:
+    `421BA1BBB5D582E0E60A666B3845C0CF75A8230A5A9B2397FFABDE177490049A`
+  - `npm ci` / typecheck / full `npm test` / build: PASS
+- Canary PASS on exact machine profile
+  `gpt-5.6-luna / max / priority`; sandbox unchanged and the expected 14-tool
+  surface including `notify_development_stop` was preserved.
+- Guarded Production switch PASS:
+  - current: `1.4.2-biaogu.10`
+  - current root: `D:\Engineering_Bridge_System\BridgeVersions\1.4.2-biaogu.10`
+  - immediate rollback: `1.4.2-biaogu.9`
+  - local MCP no-auth: 401
+  - local OAuth metadata: 200
+  - public MCP no-auth: 401
+  - public OAuth metadata: 200
+- Production live smoke A (missing receipt): PASS. On the active GOAL-managed
+  Shared Strength Tracking WT, `run_task` returned
+  `KNOWLEDGE_PREFLIGHT_REQUIRED` immediately and did not create a Codex task.
+- Production live smoke B (completed receipt): PASS.
+  - task: `6c182bfb-f93c-4a2b-bb43-6d71c1779731`
+  - route: `gpt-5.6-luna / max / priority / read-only`
+  - final output: `PROD_HEALTH_OK b99334d`
+  - evidence contained only the single bounded `git rev-parse --short HEAD`
+    command; no Memory, Skills, GOAL Skill, Handoff, or repo-archaeology reads
+    appeared.
+  - supervisor acceptance completed the task.
+- The command-evidence item was marked `failed` by the native event while the
+  Codex turn still returned the expected bounded output and completed normally.
+  This is recorded as a non-blocking observer/evidence-status quirk; it is not
+  the repeated-bootstrap failure class and did not trigger any extra discovery.
+- No Codex account/auth/profile/global config mutation occurred.
+- No product repo / LINE / R2 / GCP mutation occurred during this Bridge I/W.
+
+This closes the 2026-09-21 CODEX "鬼打牆" regression at source, mainline,
+immutable runtime, Canary, and Production levels. GOAL callers that provide the
+required DS preflight receipt execute normally; a caller that omits it now fails
+immediately instead of silently re-entering native Memory/Skills bootstrap.
+
+The paused Shared Strength Tracking real-context task may now resume from its
+durable checkpoint without depending on any previous Codex native thread.
+
 ## 2026-09-21 GOAL missing-receipt regression guard checkpoint
 
 - Owner reported a fresh repeated-bootstrap / "鬼打牆" symptom during the
@@ -60,20 +110,12 @@
 - No product repo / LINE / R2 / GCP mutation.
 - No Production Bridge runtime switch is part of this checkpoint.
 
-### Pending after this checkpoint
+### Historical pending from the feature checkpoint
 
-1. Owner review / explicit I/W authorization.
-2. Integrate the accepted checkpoint to canonical Bridge main.
-3. Prepare the next immutable Bridge runtime version (successor to
-   `1.4.2-biaogu.9`), validate candidate/canary, then perform the separately
-   authorized guarded Production switch while retaining `.9` rollback.
-4. Re-run two live Production smokes on a GOAL-managed WT:
-   - no receipt -> immediate `KNOWLEDGE_PREFLIGHT_REQUIRED`, no native Codex
-     thread / Memory / Skill evidence;
-   - completed receipt -> bounded Luna/MAX task succeeds with bootstrap
-     suppression.
-5. Only after those smokes pass should the paused Shared Strength Tracking
-   context-wiring task resume.
+The five items originally listed here (Owner I/W, main integration, immutable
+runtime preparation, guarded Production switch, and the two live GOAL smokes)
+were all completed by the `.10` Production acceptance section above. They are
+no longer pending.
 
 Fresh Web GPT/Codex sessions can continue from this HANDOFF + Git checkpoint;
 no prior native Codex thread is required.
