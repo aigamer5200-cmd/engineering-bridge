@@ -1,5 +1,34 @@
 # Release notes
 
+## v1.4.2-biaogu.11
+
+This release adds a mechanical convergence circuit breaker for GOAL-managed
+Codex turns that already have a completed DS Knowledge Preflight Receipt.
+
+### GOAL Codex convergence budget
+
+- completed DS-preflight turns now enter immediate delivery mode;
+- 8 completed command-only steps without file-change delivery trigger an
+  automatic `STEER_TO_DELIVER`;
+- 14 completed command-only steps trigger `HARD_DELIVER`;
+- 20 completed command-only steps terminate the stale turn with the safe
+  `EXECUTOR_NONCONVERGENT` error;
+- a completed `fileChange` resets the current command budget so productive
+  implementation can continue;
+- the budget applies only to completed DS-preflight Codex tasks. Ordinary
+  non-GOAL / legacy Codex tasks keep their previous behavior;
+- `EXECUTOR_NONCONVERGENT` is intentionally distinct from
+  `EXECUTOR_STALLED`: the former means active but semantically non-convergent,
+  while the latter still means protocol inactivity.
+
+### Validation checkpoint
+
+- `npm run typecheck`: PASS.
+- focused convergence/error/preflight tests: 72 passed, 0 failed.
+- full `npm test`: 429 total, 424 passed, 0 failed, 5 skipped.
+- no production activation, MCP reconnect, account/auth/profile mutation,
+  controlled write, or GOAL I/W is part of this candidate checkpoint.
+
 ## v1.4.2-biaogu.10
 
 This release closes a GOAL-managed Codex bootstrap regression in the ordinary

@@ -13,6 +13,8 @@ of repository search/read commands after the bounded seam is already known.
 - Isolated WT: D:\WORKTREE_ZONE\engineering-bridge-bb6eecf7
 - Branch: fix/goal-codex-convergence-20260921
 - Base: main@ce5b88b539641b17dceff01afc5263447383eb7a
+- Candidate version: 1.4.2-biaogu.11
+- First source checkpoint: 932342353048afa4e1169bb65a20091ca2317b8f
 - This HANDOFF is committed with the phase checkpoint containing the
   convergence repair.
 
@@ -74,9 +76,20 @@ Focused validation:
 
 Result:
 
-- 72 tests
-- 72 pass
+- focused: 72 tests
+- focused: 72 pass
 - 0 fail
+
+Full Bridge regression:
+
+    npm test
+
+Result:
+
+- 429 total
+- 424 pass
+- 0 fail
+- 5 skipped
 
 New tests prove:
 
@@ -87,9 +100,9 @@ New tests prove:
 - new error remains allowlisted/safe;
 - Knowledge Preflight exposes immediate delivery/convergence semantics.
 
-## Pending next phase
+## Cross-repo continuation
 
-Update Shoestring GOAL production orchestration policy/runtime usage so:
+Shoestring GOAL must consume this candidate behavior so:
 
 1. every real bounded task starts with cycle-begin;
 2. successful Bridge execution is durably bound with cycle-execution;
@@ -99,6 +112,13 @@ Update Shoestring GOAL production orchestration policy/runtime usage so:
    emits the required interruption notification only if forward execution
    actually yields, and starts a fresh narrower Bridge task;
 6. a new child does not repeat broad repo archaeology already covered by DS.
+
+That work is tracked in:
+
+- Repo: D:\shoestring-goal
+- Branch: fix/goal-production-execution-loop-20260921
+- HANDOFF:
+  docs/HANDOFF_GOAL_PRODUCTION_EXECUTION_LOOP_REPAIR_CURRENT_STATUS.md
 
 ## Do not touch
 
