@@ -34,8 +34,11 @@
 
 - Repo: `D:\Engineering_Bridge_System\engineering-bridge`
 - Isolated WT: `D:\WORKTREE_ZONE\engineering-bridge-goal-preflight-guard-20260921`
-- Branch: `fix/goal-preflight-receipt-guard-20260921`
-- Base: `7507af774254517261d24133f02528a365625b65`
+- Feature branch: `fix/goal-preflight-receipt-guard-20260921`
+- Feature checkpoint: `13cb1f2a4ce6d99affff2b567db182886d2cce8a`
+- Owner-authorized integration to canonical `main`:
+  `999f3f9042d1bd74790ba9aacd3bbd1fd54e5e3a`
+- Release target: `1.4.2-biaogu.10`
 - Files changed:
   - `src/core/development-execution-guard-client.ts`
   - `src/core/errors.ts`

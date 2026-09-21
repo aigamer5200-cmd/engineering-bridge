@@ -1,5 +1,41 @@
 # Release notes
 
+## v1.4.2-biaogu.10
+
+This release closes a GOAL-managed Codex bootstrap regression in the ordinary
+`run_task` path. A GOAL task that accidentally omitted the structured Knowledge
+Preflight Receipt could previously fall back to Codex native Memory/Skills
+bootstrap and spend a long turn re-reading context instead of executing the
+already-bounded DS task.
+
+### GOAL preflight fail-closed guard
+
+- Bridge reuses the existing development-execution guard's durable
+  `goal_delegated` state; it does not infer GOAL from prompt text, repo names,
+  or model choice.
+- For `goal_delegated` + `executor=codex`, `run_task` now requires a completed
+  Knowledge Preflight Receipt before native Codex launch.
+- Missing receipt or explicit `preflight_completed=false` returns
+  `KNOWLEDGE_PREFLIGHT_REQUIRED` before a Codex thread can start.
+- Stale-schema receipts that omit `preflight_completed` remain compatible and
+  still activate the accepted DS-preflight bootstrap suppression.
+- Non-GOAL Codex behavior is unchanged.
+- Account/model/reasoning/service-tier/sandbox routing, Telegram guard,
+  controlled patches, DSH, OAuth, and production authority are unchanged.
+
+### Validation checkpoint
+
+- `npm run typecheck`: PASS.
+- focused guard/error tests: 9 passed, 0 failed.
+- full `npm test`: 426 total, 421 passed, 0 failed, 5 skipped.
+- real active-GOAL guard classification smoke:
+  `goal_delegated=true`, missing receipt blocked, explicit-false receipt
+  blocked, stale-schema receipt accepted.
+- same-session Luna/MAX task with a completed receipt executed only the bounded
+  requested command and showed no Memory/Skills archaeology.
+- existing dependency audit remains 2 moderate / 1 high; no unrelated
+  dependency update is included.
+
 ## v1.4.2-biaogu.9
 
 This release adds the Bridge half of the non-GOAL bottom-layer development
