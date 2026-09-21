@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DevelopmentExecutionGuardClient,
   DevelopmentExecutionGuardSupervisor,
+  isGoalDelegatedGuardReceipt,
   type GuardProcessRunner,
   type GuardedTaskState
 } from "../../src/core/development-execution-guard-client.js";
@@ -73,6 +74,18 @@ test("enabled heartbeat is fail-closed unless the helper returns ok true", async
   assert.equal(invocations[0]?.args.includes("--task-id"), true);
 });
 
+test("goal-delegated guard receipt is detected without broad state inference", () => {
+  assert.equal(isGoalDelegatedGuardReceipt({
+    ok: true,
+    payload: { ok: true, result: { state: "goal_delegated" } }
+  }), true);
+  assert.equal(isGoalDelegatedGuardReceipt({
+    ok: true,
+    payload: { ok: true, result: { state: "non_goal_active" } }
+  }), false);
+  assert.equal(isGoalDelegatedGuardReceipt({ ok: true }), false);
+});
+
 test("explicit stop succeeds only with a delivered helper receipt", async () => {
   const runner: GuardProcessRunner = async (_executable, args) => {
     assert.equal(args.includes("stop"), true);
@@ -120,6 +133,8 @@ test("supervisor heartbeats active tasks then shortens the lease at terminal sta
     () => state
   );
 
+  const preflight = await supervisor.beforeTaskReceipt(String.raw`D:\repo`);
+  assert.equal(preflight.ok, true);
   assert.equal(await supervisor.beforeTask(String.raw`D:\repo`), true);
   supervisor.start("task-1", String.raw`D:\repo`);
   await new Promise<void>((resolve) => setTimeout(resolve, 15));

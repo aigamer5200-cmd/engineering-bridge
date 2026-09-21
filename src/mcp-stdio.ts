@@ -13,7 +13,8 @@ import { VERSION } from "./version.js";
 import { CoreError, serializeError } from "./core/errors.js";
 import {
   DevelopmentExecutionGuardClient,
-  DevelopmentExecutionGuardSupervisor
+  DevelopmentExecutionGuardSupervisor,
+  isGoalDelegatedGuardReceipt
 } from "./core/development-execution-guard-client.js";
 import { RegisteredWorkspaceTaskService } from "./tasks/registered-workspace-task-service.js";
 import { ExecutionReceiptStore } from "./tasks/execution-receipt-store.js";
@@ -25,7 +26,10 @@ import {
   ValidationProfileStore
 } from "./tasks/validation-profile-store.js";
 import { ValidationProcessRunner } from "./tasks/validation-process-runner.js";
-import { KnowledgePreflightReceiptSchema } from "./tasks/knowledge-preflight-receipt.js";
+import {
+  KnowledgePreflightReceiptSchema,
+  isCompletedKnowledgePreflight
+} from "./tasks/knowledge-preflight-receipt.js";
 import { createTaskObserver } from "./tasks/task-observer.js";
 import { ManagedWorkspaceCatalog } from "./workspaces/managed-workspace-catalog.js";
 import { RegisteredWorkspaceRegistry } from "./workspaces/registered-workspace-registry.js";
@@ -172,7 +176,7 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("run_task", {
-    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Explicit Codex A/B routing uses bounded quota preflight and may fail over once to the alternate account without changing model/reasoning/service tier/sandbox; if both accounts are quota-exhausted, the Bridge may fall back to read-only DSH with durable provenance. Codex may also use native live web research and a bounded Knowledge Preflight Receipt.",
+    description: "Run a supervised task in a pre-registered workspace. Codex defaults to danger-full-access (Owner-approved full access) and may be explicitly narrowed to workspace-write or read-only; DSH remains read-only. Explicit Codex A/B routing uses bounded quota preflight and may fail over once to the alternate account without changing model/reasoning/service tier/sandbox; if both accounts are quota-exhausted, the Bridge may fall back to read-only DSH with durable provenance. Codex may also use native live web research and a bounded Knowledge Preflight Receipt. When the development guard reports a GOAL-managed (goal_delegated) workspace, Codex run_task requires a completed preflight_receipt and fails closed before launch if the receipt is missing.",
     inputSchema: {
       workspace_id: z.string().min(1),
       instruction: z.string().min(1),
@@ -206,8 +210,18 @@ async function main(): Promise<void> {
       } catch (error) {
         if (!(error instanceof CoreError) || error.code !== "UNKNOWN_WORKSPACE") throw error;
       }
-      if (workspaceRoot !== undefined && !await developmentGuardSupervisor.beforeTask(workspaceRoot)) {
-        throw new CoreError("DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE");
+      if (workspaceRoot !== undefined) {
+        const guardReceipt = await developmentGuardSupervisor.beforeTaskReceipt(workspaceRoot);
+        if (!guardReceipt.ok) {
+          throw new CoreError("DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE");
+        }
+        if (
+          executor === "codex" &&
+          isGoalDelegatedGuardReceipt(guardReceipt) &&
+          !isCompletedKnowledgePreflight(preflight_receipt)
+        ) {
+          throw new CoreError("KNOWLEDGE_PREFLIGHT_REQUIRED");
+        }
       }
       const { taskId } = service.startTask({
         workspace_id,

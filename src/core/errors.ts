@@ -28,6 +28,7 @@ export const ERROR_CODES = [
   "DSH_EXECUTION_FAILED",
   "TASK_INTERRUPTED",
   "DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE",
+  "KNOWLEDGE_PREFLIGHT_REQUIRED",
   "UNSUPPORTED_ACTION"
 ] as const;
 
@@ -68,6 +69,7 @@ const ERROR_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   DSH_EXECUTION_FAILED: "DSH execution failed.",
   TASK_INTERRUPTED: "The task was interrupted.",
   DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE: "The required development execution guard is unavailable.",
+  KNOWLEDGE_PREFLIGHT_REQUIRED: "A completed Knowledge Preflight Receipt is required for this GOAL-managed Codex task.",
   UNSUPPORTED_ACTION: "The requested action is not supported."
 };
 

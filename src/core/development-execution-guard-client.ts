@@ -45,6 +45,16 @@ export interface GuardCommandReceipt {
   readonly payload?: Readonly<Record<string, unknown>> | undefined;
 }
 
+export function isGoalDelegatedGuardReceipt(
+  receipt: GuardCommandReceipt | undefined
+): boolean {
+  const result = receipt?.payload?.result;
+  if (result === null || typeof result !== "object" || Array.isArray(result)) {
+    return false;
+  }
+  return (result as Readonly<Record<string, unknown>>).state === "goal_delegated";
+}
+
 const defaultRunner: GuardProcessRunner = async (executable, args) => {
   try {
     const result = await execFileAsync(executable, [...args], {
@@ -207,12 +217,16 @@ export class DevelopmentExecutionGuardSupervisor {
     private readonly taskState: (taskId: string) => GuardedTaskState | undefined
   ) {}
 
-  async beforeTask(workspaceRoot: string): Promise<boolean> {
-    const receipt = await this.client.heartbeat({
+  async beforeTaskReceipt(workspaceRoot: string): Promise<GuardCommandReceipt> {
+    return this.client.heartbeat({
       workspaceRoot,
       source: "bridge",
       activity: "run_task-preflight"
     });
+  }
+
+  async beforeTask(workspaceRoot: string): Promise<boolean> {
+    const receipt = await this.beforeTaskReceipt(workspaceRoot);
     return receipt.ok;
   }
 
