@@ -1,6 +1,7 @@
 # GOAL Codex Convergence Repair — Current Status
 
 Date: 2026-09-21
+Status: GOAL_CODEX_CONVERGENCE_IW_READY
 
 ## Current task
 
@@ -117,8 +118,19 @@ That work is tracked in:
 
 - Repo: D:\shoestring-goal
 - Branch: fix/goal-production-execution-loop-20260921
+- Final feature checkpoint:
+  41b03d8 (fix(goal): enforce production execution loop)
 - HANDOFF:
   docs/HANDOFF_GOAL_PRODUCTION_EXECUTION_LOOP_REPAIR_CURRENT_STATUS.md
+
+Shoestring full regression at that checkpoint:
+
+- 451 tests
+- 451 PASS
+- 0 FAIL
+
+The cross-repo repair is therefore ready for Owner-authorized I/W. No main
+integration, production activation, or MCP reconnect is implied.
 
 ## Do not touch
 
