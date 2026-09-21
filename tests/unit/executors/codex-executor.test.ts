@@ -538,6 +538,148 @@ test("DS-preflight memory-required bootstrap preserves configured memory while k
   assert.equal("features" in threadStart.params.config, false);
 });
 
+test("DS-preflight convergence budget steers, hard-delivers, then terminates a command loop", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(
+    fakeStarter({ appServerOutput: "", autoComplete: false }, invocations),
+    process.platform,
+    {
+      ...SHORT_TIMING,
+      executionTimeoutMs: 2_000,
+      protocolInactivityTimeoutMs: 1_000,
+      rpcCallTimeoutMs: 1_000
+    }
+  );
+  const pending = executor.execute({
+    taskId: TASK_ID,
+    instruction: "deliver the bounded implementation",
+    bootstrap: { mode: "ds_preflight", memoryRequired: false }
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  invocation.send({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } }
+  });
+  for (let index = 1; index <= 20; index += 1) {
+    invocation.send({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: `cmd-${index}`,
+          type: "commandExecution",
+          status: "completed",
+          command: `rg/read-only-${index}`
+        }
+      }
+    });
+  }
+
+  const result = await settlesWithin(pending, 400);
+  assert.equal(result.kind, "failed");
+  if (result.kind === "failed") assert.equal(result.error.code, "EXECUTOR_NONCONVERGENT");
+  const messages = invocation.stdin.trim().split("\n").map((line) => JSON.parse(line));
+  const steers = messages.filter((message: { method?: string }) => message.method === "turn/steer");
+  assert.equal(steers.length, 2);
+  assert.match(JSON.stringify(steers[0]), /STEER_TO_DELIVER/u);
+  assert.match(JSON.stringify(steers[1]), /HARD_DELIVER/u);
+});
+
+test("DS-preflight file-change progress resets the exploration budget", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({
+    taskId: TASK_ID,
+    instruction: "bounded implementation with progress",
+    bootstrap: { mode: "ds_preflight", memoryRequired: false }
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  invocation.send({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } }
+  });
+  for (let index = 1; index <= 7; index += 1) {
+    invocation.send({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { id: `cmd-a-${index}`, type: "commandExecution", status: "completed", command: `read-a-${index}` }
+      }
+    });
+  }
+  invocation.send({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "change-1",
+        type: "fileChange",
+        status: "completed",
+        changes: [{ path: "src/example.ts", diff: "+bounded progress" }]
+      }
+    }
+  });
+  for (let index = 1; index <= 7; index += 1) {
+    invocation.send({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { id: `cmd-b-${index}`, type: "commandExecution", status: "completed", command: `read-b-${index}` }
+      }
+    });
+  }
+  invocation.send({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } }
+  });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  assert.equal(invocation.stdin.includes('"method":"turn/steer"'), false);
+});
+
+test("non-DS-preflight Codex tasks keep the legacy unlimited command behavior", async () => {
+  const invocations: Invocation[] = [];
+  const executor = timedExecutor(fakeStarter({ appServerOutput: "", autoComplete: false }, invocations));
+  const pending = executor.execute({ taskId: TASK_ID, instruction: "legacy task" });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const invocation = invocations[0];
+  assert.ok(invocation);
+  invocation.send({
+    method: "turn/started",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "inProgress" } }
+  });
+  for (let index = 1; index <= 25; index += 1) {
+    invocation.send({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { id: `legacy-${index}`, type: "commandExecution", status: "completed", command: `legacy-${index}` }
+      }
+    });
+  }
+  invocation.send({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed" } }
+  });
+
+  const result = await pending;
+  assert.equal(result.kind, "completed");
+  assert.equal(invocation.stdin.includes('"method":"turn/steer"'), false);
+});
+
 test("legacy reasoning alias is validated and sent as the upstream turn effort", async () => {
   const invocations: Invocation[] = [];
   const executor = timedExecutor(fakeStarter({

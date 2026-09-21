@@ -22,6 +22,9 @@ const ENVIRONMENT_ALLOWLIST = ["PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "
 const MAX_EVIDENCE = 50;
 const MAX_TEXT = 16_384;
 const MAX_EVIDENCE_BYTES = 65_536;
+const DS_PREFLIGHT_STEER_COMMAND_BUDGET = 8;
+const DS_PREFLIGHT_HARD_DELIVER_COMMAND_BUDGET = 14;
+const DS_PREFLIGHT_TERMINATE_COMMAND_BUDGET = 20;
 // Codex app-server commandExecution items legitimately include aggregatedOutput
 // in the same JSONL frame. Repository reads can therefore exceed 64 KiB even
 // though the event is valid. Keep a defensive transport bound, but make it
@@ -209,6 +212,10 @@ export class CodexExecutor implements Executor {
     }
 
     const evidence = new Map<string, ExecutorEvidence>();
+    const dsPreflightCompletedCommandIds = new Set<string>();
+    let dsPreflightCommandCount = 0;
+    let dsPreflightSteerSent = false;
+    let dsPreflightHardDeliverSent = false;
     let evidenceDropped = 0;
     let output = "";
     let buffer = "";
@@ -352,6 +359,56 @@ export class CodexExecutor implements Executor {
         params.threadId === this.threadId &&
         params.turnId === this.startedTurnId;
     };
+    const steerActiveTurn = (instruction: string): void => {
+      if (!this.threadId || !this.startedTurnId || settled || terminationResult !== undefined) return;
+      void this.call("turn/steer", {
+        threadId: this.threadId,
+        expectedTurnId: this.startedTurnId,
+        input: [{ type: "text", text: instruction }]
+      }).catch((): void => {});
+    };
+    const enforceDsPreflightDeliveryBudget = (
+      item: Record<string, unknown>,
+      status: string,
+    ): void => {
+      if (request.bootstrap?.mode !== "ds_preflight" || status !== "completed") return;
+      if (item.type === "fileChange") {
+        dsPreflightCommandCount = 0;
+        dsPreflightSteerSent = false;
+        dsPreflightHardDeliverSent = false;
+        return;
+      }
+      if (item.type !== "commandExecution" || typeof item.id !== "string") return;
+      if (dsPreflightCompletedCommandIds.has(item.id)) return;
+      dsPreflightCompletedCommandIds.add(item.id);
+      dsPreflightCommandCount += 1;
+
+      if (
+        dsPreflightCommandCount >= DS_PREFLIGHT_TERMINATE_COMMAND_BUDGET
+      ) {
+        beginTermination(failure("EXECUTOR_NONCONVERGENT"), 0);
+        return;
+      }
+      if (
+        !dsPreflightHardDeliverSent &&
+        dsPreflightCommandCount >= DS_PREFLIGHT_HARD_DELIVER_COMMAND_BUDGET
+      ) {
+        dsPreflightHardDeliverSent = true;
+        steerActiveTurn(
+          "HARD_DELIVER: stop repository exploration now. Produce the assigned bounded result, patch/proposal, tests, or a concrete blocker immediately. Do not run more broad searches."
+        );
+        return;
+      }
+      if (
+        !dsPreflightSteerSent &&
+        dsPreflightCommandCount >= DS_PREFLIGHT_STEER_COMMAND_BUDGET
+      ) {
+        dsPreflightSteerSent = true;
+        steerActiveTurn(
+          "STEER_TO_DELIVER: DS preflight is already complete. Stop broad search/read activity and move directly to the assigned bounded implementation or result."
+        );
+      }
+    };
     this.beginInterrupt = () => {
       if (settled || terminationResult !== undefined) return;
       const result: ExecutorResult = { kind: "interrupted", output, evidence: visibleEvidence() };
@@ -474,6 +531,7 @@ export class CodexExecutor implements Executor {
               evidenceDropped += 1;
             }
             enforceEvidenceBudget();
+            enforceDsPreflightDeliveryBudget(item, status);
             request.onEvidence?.(visibleEvidence());
           }
         }

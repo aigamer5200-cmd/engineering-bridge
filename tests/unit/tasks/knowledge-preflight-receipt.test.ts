@@ -57,6 +57,8 @@ test("receipt without the new completion flag defaults to bounded DS-preflight b
   assert.match(rendered, /- memory: skip_unless_required/u);
   assert.match(rendered, /- skills: explicit_only/u);
   assert.match(rendered, /- repo_discovery: bounded/u);
+  assert.match(rendered, /- delivery_mode: immediate/u);
+  assert.match(rendered, /- convergence: bounded command budget/u);
   assert.match(rendered, /- goal_autostart: false/u);
   assert.match(rendered, /required_skills:\n- none/u);
 });
@@ -92,6 +94,8 @@ test("completed DS preflight renders bounded bootstrap policy and explicit requi
   assert.match(rendered, /- memory: skip_unless_required/u);
   assert.match(rendered, /- skills: explicit_only/u);
   assert.match(rendered, /- repo_discovery: bounded/u);
+  assert.match(rendered, /- delivery_mode: immediate/u);
+  assert.match(rendered, /- convergence: bounded command budget/u);
   assert.match(rendered, /- goal_autostart: false/u);
   assert.match(rendered, /required_skills:\n- repo-safety-handoff/u);
 });

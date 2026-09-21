@@ -69,6 +69,8 @@ export function attachKnowledgePreflightReceipt(
         `- memory: ${receipt.memory_required === true ? "required" : "skip_unless_required"}`,
         "- skills: explicit_only",
         "- repo_discovery: bounded",
+        "- delivery_mode: immediate",
+        "- convergence: bounded command budget; stop broad search after supervisor steer",
         "- goal_autostart: false",
         "required_skills:",
         ...(receipt.required_skills?.length ? bulletList(receipt.required_skills) : ["- none"])

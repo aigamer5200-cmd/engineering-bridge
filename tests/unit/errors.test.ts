@@ -28,6 +28,7 @@ test("exposes the executor error codes", () => {
     "UNKNOWN_EXECUTOR_FAILURE",
     "CODEX_PROTOCOL_ERROR",
     "CODEX_EXECUTION_FAILED",
+    "EXECUTOR_NONCONVERGENT",
     "EXECUTOR_STALLED",
     "DSH_UNAVAILABLE",
     "DSH_PROTOCOL_ERROR",
@@ -49,6 +50,10 @@ test("exposes the executor error codes", () => {
   });
   assert.deepEqual(serializeError(new CoreError("CODEX_EXECUTION_FAILED")), {
     code: "CODEX_EXECUTION_FAILED", message: "Codex execution failed."
+  });
+  assert.deepEqual(serializeError(new CoreError("EXECUTOR_NONCONVERGENT")), {
+    code: "EXECUTOR_NONCONVERGENT",
+    message: "The executor exceeded the bounded delivery budget without converging."
   });
   assert.deepEqual(serializeError(new CoreError("DSH_UNAVAILABLE")), {
     code: "DSH_UNAVAILABLE", message: "DSH is unavailable."
