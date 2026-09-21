@@ -34,6 +34,7 @@ test("exposes the executor error codes", () => {
     "DSH_EXECUTION_FAILED",
     "TASK_INTERRUPTED",
     "DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE",
+    "KNOWLEDGE_PREFLIGHT_REQUIRED",
     "UNSUPPORTED_ACTION"
   ]);
   assert.deepEqual(serializeError(new CoreError("CODEX_UNAVAILABLE")), {
@@ -64,6 +65,10 @@ test("exposes the executor error codes", () => {
   assert.deepEqual(serializeError(new CoreError("DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE")), {
     code: "DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE",
     message: "The required development execution guard is unavailable."
+  });
+  assert.deepEqual(serializeError(new CoreError("KNOWLEDGE_PREFLIGHT_REQUIRED")), {
+    code: "KNOWLEDGE_PREFLIGHT_REQUIRED",
+    message: "A completed Knowledge Preflight Receipt is required for this GOAL-managed Codex task."
   });
   assert.deepEqual(serializeError(new CoreError("UNSUPPORTED_ACTION")), {
     code: "UNSUPPORTED_ACTION", message: "The requested action is not supported."

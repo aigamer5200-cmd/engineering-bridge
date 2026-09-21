@@ -1,5 +1,80 @@
 # Codex Bootstrap / Memory Preflight Slimming Handoff
 
+## 2026-09-21 GOAL missing-receipt regression guard checkpoint
+
+- Owner reported a fresh repeated-bootstrap / "鬼打牆" symptom during the
+  Shared Strength Tracking real-context task.
+- Live Bridge task evidence proved the affected ordinary `run_task` entered
+  Codex native bootstrap again: it read `~/.codex/memories`, rollout summaries,
+  GOAL Skill, development-stop Skill, and project Skills before implementation.
+- A same-session read-only Luna/MAX smoke with a completed structured
+  `preflight_receipt` executed only the single requested Git command and showed
+  no Memory/Skills archaeology. Controlled-patch generation also completed
+  normally. This isolates the defect to the ordinary GOAL `run_task` path when
+  the caller omits the structured receipt; it is not a Luna model failure.
+- The development guard already returns durable state `goal_delegated` for a
+  GOAL-managed worktree. The repair therefore uses that existing authority
+  instead of trying to infer GOAL from prompt text or repository names.
+- New fail-closed rule in this branch:
+  - when the development guard says `goal_delegated` and executor=`codex`,
+    `run_task` requires a completed Knowledge Preflight Receipt before Codex is
+    launched;
+  - a missing receipt or explicit `preflight_completed=false` returns
+    `KNOWLEDGE_PREFLIGHT_REQUIRED` before native Codex bootstrap can start;
+  - stale-schema receipts that omit `preflight_completed` remain compatible and
+    are still treated as completed DS preflight, matching the accepted `.8/.9`
+    behavior;
+  - non-GOAL tasks are unchanged because the hard gate activates only on the
+    guard's exact `goal_delegated` state.
+- This closes the dangerous silent fallback from "DS already did preflight" to
+  "Codex independently redoes Memory/Skills/repo archaeology". A caller bug now
+  fails immediately and visibly instead of consuming a long Luna/MAX task.
+
+### Current implementation checkpoint
+
+- Repo: `D:\Engineering_Bridge_System\engineering-bridge`
+- Isolated WT: `D:\WORKTREE_ZONE\engineering-bridge-goal-preflight-guard-20260921`
+- Branch: `fix/goal-preflight-receipt-guard-20260921`
+- Base: `7507af774254517261d24133f02528a365625b65`
+- Files changed:
+  - `src/core/development-execution-guard-client.ts`
+  - `src/core/errors.ts`
+  - `src/mcp-stdio.ts`
+  - `tests/unit/development-execution-guard-client.test.ts`
+  - `tests/unit/errors.test.ts`
+- Validation:
+  - `npm run typecheck` -> PASS
+  - focused guard/error tests -> `9/9 PASS`
+  - full `npm test` -> `426 total / 421 PASS / 0 FAIL / 5 SKIP`
+  - real guard classification smoke on the active Shared Strength Tracking WT:
+    `guard_ok=true`, `goal_delegated=true`,
+    `missing_receipt_blocked=true`, `stale_schema_receipt_allowed=true`,
+    `explicit_false_blocked=true`
+- Existing dependency audit remains `2 moderate / 1 high`; no unrelated
+  dependency remediation was attempted.
+- No Codex account/auth/profile/global config mutation.
+- No Shoestring GOAL runtime implementation mutation.
+- No product repo / LINE / R2 / GCP mutation.
+- No Production Bridge runtime switch is part of this checkpoint.
+
+### Pending after this checkpoint
+
+1. Owner review / explicit I/W authorization.
+2. Integrate the accepted checkpoint to canonical Bridge main.
+3. Prepare the next immutable Bridge runtime version (successor to
+   `1.4.2-biaogu.9`), validate candidate/canary, then perform the separately
+   authorized guarded Production switch while retaining `.9` rollback.
+4. Re-run two live Production smokes on a GOAL-managed WT:
+   - no receipt -> immediate `KNOWLEDGE_PREFLIGHT_REQUIRED`, no native Codex
+     thread / Memory / Skill evidence;
+   - completed receipt -> bounded Luna/MAX task succeeds with bootstrap
+     suppression.
+5. Only after those smokes pass should the paused Shared Strength Tracking
+   context-wiring task resume.
+
+Fresh Web GPT/Codex sessions can continue from this HANDOFF + Git checkpoint;
+no prior native Codex thread is required.
+
 ## 2026-09-17 `.8` Production acceptance and main authority convergence
 
 - Compatibility repair commits:
