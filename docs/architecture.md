@@ -1,54 +1,43 @@
 # Architecture
 
-This document describes the Engineering Bridge V1 (1.4.2) behavior.
+Engineering Bridge 1.4.2-biaogu.12 is a local MCP STDIO transport with one
+active executor: the official Codex CLI app-server.
 
-Engineering Bridge is a local STDIO MCP server with fourteen tools and a small layered structure:
+The active path has three small responsibilities:
 
-1. `src/mcp-stdio.ts` loads trusted workspace configuration (manual entries plus `project_root` approved roots), loads the managed-workspace catalog, registers all fourteen tools (`run_task`, `task_result`, `notify_development_stop`, `control_task`, `bind_project`, `create_project`, `authorize_workspace_write`, `generate_controlled_patch`, `refine_controlled_patch`, `submit_controlled_patch`, `apply_controlled_patch`, `commit_controlled_patch`, `configure_validation_profile`, `validate_controlled_patch`), and connects the MCP STDIO transport.
-2. `RegisteredWorkspaceRegistry` maps fixed caller-visible IDs to absolute configured roots, distinguishing manual registrations (authoritative through `workspaces.json`) from managed registrations. `ManagedWorkspaceCatalog` persists managed registrations and their controlled-write authorization to `<config>.managed-workspaces.json` with atomic 0600 writes. `WorkspaceOnboardingService` implements `bind_project`/`create_project` (exact `BIND`/`CREATE`, canonical containment inside `project_root`) and `authorize_workspace_write` (exact `AUTHORIZE`, managed workspaces only, persist-before-apply).
-3. `RegisteredWorkspaceTaskService` assigns UUID task IDs and holds task, supervisor-review, thread, output, partial-output, error, and evidence state in process memory. It resolves the requested executor through an `ExecutorFactory` and drives `CodexExecutor` or `DshExecutor`.
-4. `CodexExecutor` starts the local `codex app-server --stdio` protocol with an explicit sandbox mode. Interactive MCP `run_task` defaults Codex to `danger-full-access` under the Owner-approved local policy, while callers may narrow it to `workspace-write` or `read-only`. `DshExecutor` remains pinned to `DSH_PERMISSION_MODE=read-only` with an explicit environment allowlist (including `DEEPSEEK_API_KEY` and `DSH_TOOLS_MODE`; proxy variables excluded). `ControlledPatchService` keeps proposal generation/refinement read-only and owns the fixed Git boundaries for applying reviewed patches and creating an explicitly confirmed controlled commit. Optional validation uses a fixed per-workspace profile persisted to `<config>.validation-profiles.json` and runs candidates in a temporary detached worktree.
-5. `DevelopmentExecutionGuardClient` / `DevelopmentExecutionGuardSupervisor` are an optional non-GOAL observability module. When enabled, a registered `run_task` must pass a guard heartbeat before dispatch; queued/running tasks renew the shared worktree lease; terminal child state shortens that lease to a grace period rather than declaring a user-visible stop. The explicit `notify_development_stop` tool uses the same guard for known stop events. When disabled, this module does not spawn the helper and legacy Bridge execution remains unchanged.
+1. `src/mcp-stdio.ts` loads trusted workspace configuration, preserves the
+   `project_root` containment boundary, binds existing projects, and registers
+   exactly `bind_project`, `run_task`, `task_result`, and `control_task`.
+2. `ThinCodexTaskService` resolves a registered workspace, creates a UUID,
+   starts one Codex executor, retains running or terminal state in memory, and
+   exposes the interrupt seam.
+3. `CodexExecutor` starts `codex app-server --stdio`, performs the official
+   initialize/thread/turn JSON-RPC exchange, forwards the selected model and
+   reasoning effort, collects bounded evidence, parses large JSONL frames, and
+   cleans up the child process after completion or explicit interruption.
 
-There is no HTTP server, UI, database, account system, remote transport, or general command runner. The optional Development Execution Guard uses bounded child-process helper calls and an in-process heartbeat timer; the external lease watchdog belongs to the Shoestring runtime, not Bridge Core.
+The active service never selects another executor, creates a project,
+authorizes a write path, or waits for a review transition. Task states are
+`running`, `completed`, and `failed`. An interruption is represented as a
+failed task with a safe `TASK_INTERRUPTED` error and optional partial output.
 
-## Supervised task flow
+The only task-local choices are the model and reasoning fields. Omission uses
+`gpt-5.6-luna` and `max`; explicit values are passed through. The active
+executor leaves all other app-server policy and capability options absent so
+the official Codex defaults remain authoritative. Workspace `cwd`, protocol
+client metadata, task input, model, and reasoning are the only task parameters
+Bridge constructs.
 
-`run_task` accepts an optional `executor: "codex" | "dsh"` (default `codex`) and optional `sandbox`. Codex defaults to `danger-full-access`; callers may explicitly narrow it to `workspace-write` or `read-only`. Codex calls may also request task-local `model`, `reasoning` / `reasoning_effort`, `service_tier`, and account routing. Model/reasoning are validated against `model/list`, while `service_tier` is limited to `standard | priority`; an explicit service tier is forwarded to native app-server `thread/start.serviceTier` and `turn/start.serviceTier`, and omission preserves the caller/runtime default. DSH rejects Codex-only routing options and any sandbox expansion beyond `read-only`. Codex runs with approval `never`; `workspace-write` and `read-only` keep OS-shell network disabled, while `danger-full-access` uses Codex's native full-access policy. The Codex executor starts native app-server threads with `thread/start`; after supervisor feedback it preserves the returned thread ID and uses `thread/resume`, followed by a new turn, so the conversation continues on the same Codex thread. DSH runs each task as a read-only headless invocation and never fabricates a thread id.
+Codex JSON-RPC is newline-delimited. The parser buffers chunked input, accepts
+valid frames up to 16 MiB, rejects malformed shapes safely, and bounds evidence
+and diagnostics. Each RPC call has a bounded response timer to prevent a
+leaked pending request. There is no normal execution deadline and no protocol
+inactivity watchdog. Explicit interrupt uses the official interrupt request
+when possible and then bounded child cleanup.
 
-With the Development Execution Guard enabled, only already-registered
-workspaces are preflight-heartbeated. A heartbeat failure prevents task
-creation with `DEVELOPMENT_EXECUTION_GUARD_UNAVAILABLE`. Unknown workspace IDs
-retain the existing asynchronous `UNKNOWN_WORKSPACE` task contract and never
-launch an executor. The guard heartbeat is operational liveness evidence only;
-it grants no execution/write/authorization capability.
+The managed workspace catalog remains a local sidecar because binding an
+existing project must survive a Bridge restart. Task supervision state is
+process-local and is not a durable execution receipt.
 
-`task_result` reports `queued` or `running` with `ready: false`. A successful turn moves to `waiting_for_supervisor_review` with `ready: true` and `review_output`. The response also includes the fixed `executor`, a real native `thread_id` when one exists (Codex only), the bounded, process-local `evidence` collected from command-execution and file-change protocol items, and `partial_output` when a genuine interrupt produced real partial output (the task still ends `failed`). Evidence is diagnostic task output, not authorization to write or proof that a requested semantic result is correct; when existing bounds truncate or evict evidence, explicit markers (`[truncated]`, changes-omitted counts, an `evidence-drop` item) make the incompleteness visible.
-
-Codex app-server traffic is newline-delimited JSON. A valid protocol frame may
-contain large `commandExecution.aggregatedOutput` data after repository reads,
-so Bridge buffers chunked frames and accepts a complete frame up to a defensive
-16 MiB transport ceiling; evidence extraction remains separately bounded and
-does not return the command output body. On `CODEX_PROTOCOL_ERROR`, Bridge may
-surface bounded content-free diagnostics (parser stage, event sequence, frame
-length, last method/item type, terminal-frame presence, exit code, and bounded
-stdout/stderr tail length + SHA-256). Raw stdout/stderr, instructions, response
-bodies, and credentials are not included in those diagnostics.
-
-`control_task` supplies the supervisor transitions. `continue` requires a non-empty instruction while waiting for review and resumes the same Codex thread with the task's original sandbox (DSH: a new read-only headless execution). `steer` requires a non-empty instruction while a turn is running and sends it to that turn (Codex only). `interrupt` is valid only while running; an interrupted turn ends in `failed`, not in a resumable review state. `accept` is valid only while waiting for review and promotes the reviewed output to `completed` as `output`.
-
-Active task supervision state (tasks, threads, evidence, review outputs) is process-local and disappears on restart. Controlled-patch proposal/application history, the managed workspace catalog, and validation profiles persist across restarts through three local sidecar files. Executor runs have a 15-minute hard deadline and bounded termination; active Codex turns also have a two-minute matching-protocol-activity watchdog, reset only by notifications carrying the exact active `threadId` and `turnId`; RPC responses and global or mismatched notifications cannot reset it. Short RPC calls have a separate 30-second bound. There is no automatic acceptance or persistent task/audit history.
-
-The selected sandbox is part of the execution receipt. `danger-full-access` intentionally permits Codex to modify files and use the host capabilities available to that Codex process; it is therefore suitable only for the trusted local operator. DSH remains read-only. Bridge does not create an additional OS-level filesystem containment boundary.
-
-## Controlled patch flow
-
-Controlled writes are a separate path. `generate_controlled_patch`, `refine_controlled_patch`, and `submit_controlled_patch` are read-only proposal flows available in any registered workspace; no write authorization is required. Generation verifies that the configured root resolves to the Git top-level and that tracked state and the index are clean (with an existing HEAD, or unborn-repository support for added-file proposals), records the base HEAD, and schedules the executor, still read-only, to produce a textual unified-diff proposal. Submission accepts a caller-provided complete diff only against the exact current `base_head`, runs the shared preflight without an executor, and records submitted provenance. Proposals and applied history persist to `<config>.controlled-patches.json`; retained tasks are hydrated as one validated batch, invalid records are quarantined without blocking startup, and replay/applied ambiguity and global invariants fail closed.
-
-`apply_controlled_patch` is the controlled file-application checkpoint: it requires controlled-write permission (managed `AUTHORIZE` or a manual `allow_write: true` entry), confirmation equal to exact, case-sensitive `APPLY`, a known completed proposal that has not already been applied, the original HEAD (including unborn base), a clean tracked worktree and index, and a safe unified text patch. Targets may modify existing tracked regular files or add an ordinary text file using exact mode 100644 when that path is absent from base HEAD, the current index, and the worktree. Bridge then runs fixed `git apply --check` and `git apply` commands without a shell. It does not run tests, stage, commit, or push.
-
-Optional proposal validation is a separate read-only gate. `configure_validation_profile` installs one fixed argv-only profile per workspace after exact `CONFIGURE`; `validate_controlled_patch` applies the candidate in a temporary detached worktree and returns `PASS`, `FAIL`, or `INCOMPLETE`. Validation does not authorize `APPLY` or change proposal state, and the temporary worktree is isolation for the registered workspace rather than a host-level sandbox.
-
-`commit_controlled_patch` is the separate Git-history checkpoint. It requires an already-`APPLY`ed retained proposal, a non-empty commit message, and exact case-sensitive `COMMIT`, then creates one Git commit containing only the exact retained patch. Under the existing per-workspace lock it distinguishes tracked targets, patch-added untracked targets, and pre-existing unrelated unignored untracked files. Unrelated tracked/staged dirt is rejected; unrelated untracked files are allowed only through a stable file-level path and content fingerprint compared at discrete verification checkpoints. Existing tracked gitlink worktrees are scan boundaries rather than directories interpreted with superproject ignore rules. Ignored paths remain outside the snapshot, unsafe special files fail closed, and no unrelated path is staged. This is neither continuous filesystem monitoring nor a transactional history rollback: if Git creates the commit but final recovery-anchor verification fails, the call returns `WORKSPACE_PRECONDITION_FAILED` while HEAD remains advanced, and Bridge does not reset or rewrite the commit. It never pushes, and no gate implies push or Release creation.
-
-The generation prompt asks the executor for a narrow valid diff, but prompt compliance is not a security boundary. Patch validation is code-enforced; whether the proposed semantic change is desirable remains a human review decision.
+Older governance and proposal modules remain in the repository for source and
+test compatibility, but `mcp-stdio.ts` does not import or activate them.

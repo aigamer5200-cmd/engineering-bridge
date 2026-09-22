@@ -5,26 +5,27 @@ import { CoreError, serializeError } from "../core/errors.js";
 import type { ErrorCode } from "../core/errors.js";
 import { VERSION } from "../version.js";
 import { resolveCommand } from "./command-resolution.js";
-import { resolveCodexAccountLaunch } from "./codex-account-router.js";
 import {
-  DEFAULT_EXECUTOR_TIMING,
   signalExecution,
   signalProcessGroup,
   type Executor,
   type ExecutorEvidence,
   type ExecutorRequest,
-  type ExecutorResult,
-  type ExecutorTiming
+  type ExecutorResult
 } from "./executor.js";
 
 export type ProcessStarter = (executable: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
+export const DEFAULT_CODEX_MODEL = "gpt-5.6-luna";
+export const DEFAULT_CODEX_REASONING = "max";
+type CodexExecutorTiming = {
+  readonly interruptGraceMs: number;
+  readonly killGraceMs: number;
+  readonly rpcCallTimeoutMs?: number;
+};
 const ENVIRONMENT_ALLOWLIST = ["PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "USER", "LOGNAME"] as const;
 const MAX_EVIDENCE = 50;
 const MAX_TEXT = 16_384;
 const MAX_EVIDENCE_BYTES = 65_536;
-const DS_PREFLIGHT_STEER_COMMAND_BUDGET = 8;
-const DS_PREFLIGHT_HARD_DELIVER_COMMAND_BUDGET = 14;
-const DS_PREFLIGHT_TERMINATE_COMMAND_BUDGET = 20;
 // Codex app-server commandExecution items legitimately include aggregatedOutput
 // in the same JSONL frame. Repository reads can therefore exceed 64 KiB even
 // though the event is valid. Keep a defensive transport bound, but make it
@@ -61,8 +62,6 @@ function classifiedStructuredError(error: unknown): ErrorCode | undefined {
   const info = infoValue.toLowerCase();
   const code = codeValue.toLowerCase();
   if (info === "serveroverloaded" || code.includes("model_capacity")) return "MODEL_CAPACITY";
-  if (info.includes("auth") || code.includes("auth") || code.includes("unauthorized")) return "ACCOUNT_AUTH_INVALID";
-  if (info.includes("profile") || code.includes("profile_unavailable")) return "ACCOUNT_PROFILE_UNAVAILABLE";
   if (info.includes("rate") || code.includes("rate_limit")) return "PROVIDER_RATE_LIMIT";
   if (info.includes("overload") || info.includes("temporar") || code.includes("temporar") || code.includes("unavailable")) {
     return "PROVIDER_TRANSIENT";
@@ -123,7 +122,10 @@ export class CodexExecutor implements Executor {
   constructor(private readonly workspaceRoot: string, private readonly startProcess: ProcessStarter = spawn,
     private readonly hostEnvironment: Readonly<NodeJS.ProcessEnv> = process.env,
     private readonly platform: NodeJS.Platform = process.platform,
-    private readonly timing: ExecutorTiming & { readonly rpcCallTimeoutMs?: number } = DEFAULT_EXECUTOR_TIMING) {}
+    private readonly timing: CodexExecutorTiming = {
+      interruptGraceMs: 5_000,
+      killGraceMs: 2_000
+    }) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
     const executorStartedAt = new Date().toISOString();
@@ -169,14 +171,8 @@ export class CodexExecutor implements Executor {
     this.turnId = undefined;
     this.startedTurnId = undefined;
     let child: ChildProcessWithoutNullStreams;
-    let accountRouted = false;
     try {
-      const accountLaunch = resolveCodexAccountLaunch(request.account, this.hostEnvironment, this.platform);
-      accountRouted = accountLaunch !== undefined;
       const childEnvironment = environment(this.hostEnvironment);
-      if (accountLaunch !== undefined) {
-        Object.assign(childEnvironment, accountLaunch.environmentOverlay);
-      }
       const options: SpawnOptionsWithoutStdio = {
         cwd: this.workspaceRoot, shell: false, stdio: ["pipe", "pipe", "pipe"],
         detached: this.platform !== "win32", env: childEnvironment
@@ -187,21 +183,17 @@ export class CodexExecutor implements Executor {
       // the user instruction travels over stdin, never through the command
       // line. Everywhere else (and as the Windows fallback) the original bare
       // "codex" spawn is unchanged.
-      if (accountLaunch !== undefined) {
-        child = this.startProcess(accountLaunch.executable, accountLaunch.args, options);
+      const resolved = resolveCommand(this.hostEnvironment, "codex", {
+        nodeTarget: CODEX_NODE_TARGET,
+        preferGlobalNodeShim: true,
+        platform: this.platform
+      });
+      if (resolved.kind === "direct") {
+        child = this.startProcess(resolved.executable, ["app-server", "--stdio"], options);
+      } else if (resolved.kind === "node-launcher") {
+        child = this.startProcess(process.execPath, [resolved.scriptPath, "app-server", "--stdio"], options);
       } else {
-        const resolved = resolveCommand(this.hostEnvironment, "codex", {
-          nodeTarget: CODEX_NODE_TARGET,
-          preferGlobalNodeShim: true,
-          platform: this.platform
-        });
-        if (resolved.kind === "direct") {
-          child = this.startProcess(resolved.executable, ["app-server", "--stdio"], options);
-        } else if (resolved.kind === "node-launcher") {
-          child = this.startProcess(process.execPath, [resolved.scriptPath, "app-server", "--stdio"], options);
-        } else {
-          child = this.startProcess("codex", ["app-server", "--stdio"], options);
-        }
+        child = this.startProcess("codex", ["app-server", "--stdio"], options);
       }
       this.child = child;
     } catch (error) {
@@ -212,10 +204,6 @@ export class CodexExecutor implements Executor {
     }
 
     const evidence = new Map<string, ExecutorEvidence>();
-    const dsPreflightCompletedCommandIds = new Set<string>();
-    let dsPreflightCommandCount = 0;
-    let dsPreflightSteerSent = false;
-    let dsPreflightHardDeliverSent = false;
     let evidenceDropped = 0;
     let output = "";
     let buffer = "";
@@ -224,8 +212,6 @@ export class CodexExecutor implements Executor {
     terminalPromise = new Promise((resolve) => { terminal = resolve; });
     let settled = false;
     let directExited = false;
-    let deadlineTimer: NodeJS.Timeout | undefined;
-    let inactivityTimer: NodeJS.Timeout | undefined;
     let interruptTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let exitImmediate: NodeJS.Immediate | undefined;
@@ -244,8 +230,6 @@ export class CodexExecutor implements Executor {
         ? { ...terminationResult, output, evidence: visibleEvidence() }
         : terminationResult ?? result;
       settled = true;
-      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
-      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       if (interruptTimer !== undefined) clearTimeout(interruptTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       if (exitImmediate !== undefined) clearImmediate(exitImmediate);
@@ -259,24 +243,17 @@ export class CodexExecutor implements Executor {
       // Every protocol terminal event ends this one-shot app-server, including
       // a cooperative interrupt completion. Settling the Bridge task must not
       // leave a detached process tree alive.
-      if (accountRouted) {
-        // codex-switch performs a short auth stage/restore transaction around
-        // the inherited app-server. On normal completion, EOF lets the wrapper
-        // restore the original auth state before it exits.
-        child.stdin.end();
-      } else {
-        if (!killSignalled) {
-          if (directExited) {
-            signalProcessGroup(child, this.platform, "SIGTERM");
-            signalProcessGroup(child, this.platform, "SIGKILL");
-          } else {
-            signalExecution(child, this.platform, "SIGTERM");
-            signalExecution(child, this.platform, "SIGKILL");
-          }
-          killSignalled = true;
+      if (!killSignalled) {
+        if (directExited) {
+          signalProcessGroup(child, this.platform, "SIGTERM");
+          signalProcessGroup(child, this.platform, "SIGKILL");
+        } else {
+          signalExecution(child, this.platform, "SIGTERM");
+          signalExecution(child, this.platform, "SIGKILL");
         }
-        child.stdin.destroy();
+        killSignalled = true;
       }
+      child.stdin.destroy();
       child.stdout.destroy();
       child.stderr.destroy();
       terminal?.(withDiagnostics(finalResult));
@@ -335,79 +312,8 @@ export class CodexExecutor implements Executor {
     const beginTermination = (result: ExecutorResult, cooperativeMs: number): void => {
       if (settled || terminationResult !== undefined) return;
       terminationResult = result;
-      if (inactivityTimer !== undefined) {
-        clearTimeout(inactivityTimer);
-        inactivityTimer = undefined;
-      }
       if (cooperativeMs === 0) sendTerm();
       else interruptTimer = setTimeout(sendTerm, cooperativeMs);
-    };
-    const startInactivityWatchdog = (): void => {
-      if (settled || terminationResult !== undefined) return;
-      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(
-        () => beginTermination(failure("EXECUTOR_STALLED"), 0),
-        this.timing.protocolInactivityTimeoutMs ?? DEFAULT_EXECUTOR_TIMING.protocolInactivityTimeoutMs ?? 2 * 60_000
-      );
-    };
-    const resetInactivityWatchdog = (): void => {
-      if (inactivityTimer !== undefined) startInactivityWatchdog();
-    };
-    const activeTurnActivity = (params: Record<string, unknown>): boolean => {
-      return this.threadId !== undefined &&
-        this.startedTurnId !== undefined &&
-        params.threadId === this.threadId &&
-        params.turnId === this.startedTurnId;
-    };
-    const steerActiveTurn = (instruction: string): void => {
-      if (!this.threadId || !this.startedTurnId || settled || terminationResult !== undefined) return;
-      void this.call("turn/steer", {
-        threadId: this.threadId,
-        expectedTurnId: this.startedTurnId,
-        input: [{ type: "text", text: instruction }]
-      }).catch((): void => {});
-    };
-    const enforceDsPreflightDeliveryBudget = (
-      item: Record<string, unknown>,
-      status: string,
-    ): void => {
-      if (request.bootstrap?.mode !== "ds_preflight" || status !== "completed") return;
-      if (item.type === "fileChange") {
-        dsPreflightCommandCount = 0;
-        dsPreflightSteerSent = false;
-        dsPreflightHardDeliverSent = false;
-        return;
-      }
-      if (item.type !== "commandExecution" || typeof item.id !== "string") return;
-      if (dsPreflightCompletedCommandIds.has(item.id)) return;
-      dsPreflightCompletedCommandIds.add(item.id);
-      dsPreflightCommandCount += 1;
-
-      if (
-        dsPreflightCommandCount >= DS_PREFLIGHT_TERMINATE_COMMAND_BUDGET
-      ) {
-        beginTermination(failure("EXECUTOR_NONCONVERGENT"), 0);
-        return;
-      }
-      if (
-        !dsPreflightHardDeliverSent &&
-        dsPreflightCommandCount >= DS_PREFLIGHT_HARD_DELIVER_COMMAND_BUDGET
-      ) {
-        dsPreflightHardDeliverSent = true;
-        steerActiveTurn(
-          "HARD_DELIVER: stop repository exploration now. Produce the assigned bounded result, patch/proposal, tests, or a concrete blocker immediately. Do not run more broad searches."
-        );
-        return;
-      }
-      if (
-        !dsPreflightSteerSent &&
-        dsPreflightCommandCount >= DS_PREFLIGHT_STEER_COMMAND_BUDGET
-      ) {
-        dsPreflightSteerSent = true;
-        steerActiveTurn(
-          "STEER_TO_DELIVER: DS preflight is already complete. Stop broad search/read activity and move directly to the assigned bounded implementation or result."
-        );
-      }
     };
     this.beginInterrupt = () => {
       if (settled || terminationResult !== undefined) return;
@@ -426,10 +332,6 @@ export class CodexExecutor implements Executor {
         beginTermination(result, 0);
       }
     };
-    deadlineTimer = setTimeout(
-      () => beginTermination(failure("CODEX_EXECUTION_FAILED"), 0),
-      this.timing.executionTimeoutMs
-    );
     child.on("error", processFailure);
     child.stdin.on("error", rpcFailure);
     child.stdout.on("error", rpcFailure);
@@ -481,14 +383,12 @@ export class CodexExecutor implements Executor {
           return;
         }
         const params = object(message.params) ? message.params : {};
-        if (activeTurnActivity(params)) resetInactivityWatchdog();
         if (message.method === "turn/started") {
           const turn = object(params.turn) ? params.turn : params;
           if (params.threadId === this.threadId &&
             typeof turn.id === "string" &&
             (!this.turnId || turn.id === this.turnId)) {
             this.startedTurnId = turn.id;
-            startInactivityWatchdog();
           }
         }
         const item = object(params.item) ? params.item : undefined;
@@ -531,7 +431,6 @@ export class CodexExecutor implements Executor {
               evidenceDropped += 1;
             }
             enforceEvidenceBudget();
-            enforceDsPreflightDeliveryBudget(item, status);
             request.onEvidence?.(visibleEvidence());
           }
         }
@@ -557,7 +456,6 @@ export class CodexExecutor implements Executor {
     const finishFromExit = (code: number | null): void => {
       if (settled) return;
       protocolExitCode = code;
-      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       directExited = true;
       // The app-server can no longer answer. Reject RPC callers immediately;
       // descendant cleanup may continue for the bounded kill grace below.
@@ -591,57 +489,15 @@ export class CodexExecutor implements Executor {
     try {
       await this.call("initialize", { clientInfo: { name: "engineering-bridge", version: VERSION } });
       this.notify("initialized", {});
-      if (request.reasoning !== undefined && request.reasoning_effort !== undefined) {
-        throw new CoreError("UNSUPPORTED_ACTION");
-      }
-      const reasoningEffort = request.reasoning ?? request.reasoning_effort;
-      if (request.model !== undefined || reasoningEffort !== undefined) {
-        const modelResult = await this.call("model/list", {});
-        if (!object(modelResult) || !Array.isArray(modelResult.data)) throw new Error();
-        const models = modelResult.data.filter((entry): entry is Record<string, unknown> =>
-          object(entry) && typeof entry.model === "string"
-        );
-        const selected = request.model !== undefined
-          ? models.find((entry) => entry.model === request.model)
-          : models.find((entry) => entry.isDefault === true);
-        if (!selected) throw new CoreError("UNSUPPORTED_ACTION");
-        if (reasoningEffort !== undefined) {
-          const efforts = Array.isArray(selected.supportedReasoningEfforts)
-            ? selected.supportedReasoningEfforts
-            : [];
-          if (!efforts.some((effort) => object(effort) && effort.reasoningEffort === reasoningEffort)) {
-            throw new CoreError("UNSUPPORTED_ACTION");
-          }
-        }
-      }
-      const sandbox = request.sandbox ?? "read-only";
-      const threadParams: Record<string, unknown> = { cwd: this.workspaceRoot, approvalPolicy: "never", sandbox };
-      if (request.service_tier !== undefined) threadParams.serviceTier = request.service_tier;
-      const threadConfig: Record<string, unknown> = {};
-      if (request.webSearch === "live") threadConfig.web_search = "live";
-      if (request.bootstrap?.mode === "ds_preflight") {
-        threadConfig.skills = { include_instructions: false };
-        if (!request.bootstrap.memoryRequired) {
-          threadConfig.features = { memories: false };
-        }
-      }
-      if (Object.keys(threadConfig).length > 0) threadParams.config = threadConfig;
-      if (request.threadId) threadParams.threadId = request.threadId;
-      const threadResult = await this.call(request.threadId ? "thread/resume" : "thread/start", threadParams);
+      const model = request.model ?? DEFAULT_CODEX_MODEL;
+      const reasoning = request.reasoning ?? request.reasoning_effort ?? DEFAULT_CODEX_REASONING;
+      const threadResult = await this.call("thread/start", { cwd: this.workspaceRoot });
       if (!object(threadResult) || !object(threadResult.thread) || typeof threadResult.thread.id !== "string") throw new Error();
       this.threadId = threadResult.thread.id;
-      const sandboxPolicy = sandbox === "danger-full-access"
-        ? { type: "dangerFullAccess" }
-        : sandbox === "workspace-write"
-          ? { type: "workspaceWrite", writableRoots: [this.workspaceRoot], networkAccess: false }
-          : { type: "readOnly", networkAccess: false };
       const turnParams: Record<string, unknown> = {
         threadId: this.threadId, input: [{ type: "text", text: request.instruction }],
-        cwd: this.workspaceRoot, approvalPolicy: "never", sandboxPolicy
+        cwd: this.workspaceRoot, model, effort: reasoning
       };
-      if (request.model !== undefined) turnParams.model = request.model;
-      if (reasoningEffort !== undefined) turnParams.effort = reasoningEffort;
-      if (request.service_tier !== undefined) turnParams.serviceTier = request.service_tier;
       const turnResult = await this.call("turn/start", turnParams);
       if (!object(turnResult) || !object(turnResult.turn) || typeof turnResult.turn.id !== "string") throw new Error();
       this.turnId = turnResult.turn.id;
@@ -654,10 +510,6 @@ export class CodexExecutor implements Executor {
     return terminalPromise;
   }
 
-  async steer(instruction: string): Promise<void> {
-    if (!this.threadId || !this.startedTurnId) throw new CoreError("INVALID_STATE_TRANSITION");
-    await this.call("turn/steer", { threadId: this.threadId, expectedTurnId: this.startedTurnId, input: [{ type: "text", text: instruction }] });
-  }
   async interrupt(): Promise<void> {
     if (!this.child || !this.beginInterrupt) throw new CoreError("INVALID_STATE_TRANSITION");
     this.beginInterrupt();

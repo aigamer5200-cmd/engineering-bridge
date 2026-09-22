@@ -1,5 +1,38 @@
 # Release notes
 
+## v1.4.2-biaogu.12
+
+Phase 1 replaces the active Bridge composition with a thin official Codex
+transport.
+
+### Thin MCP contract
+
+- the public MCP surface is exactly `bind_project`, `run_task`,
+  `task_result`, and `control_task`;
+- `run_task` starts Codex only and accepts only workspace, instruction, model,
+  and reasoning inputs;
+- omitted model and reasoning use `gpt-5.6-luna` and `max`;
+- `control_task` accepts only `interrupt`;
+- task results report `running`, `completed`, or `failed` directly;
+- project binding keeps the existing approved-root boundary.
+
+### Protocol boundary
+
+- the app-server receives only the normal workspace, input, model, and
+  reasoning parameters;
+- large JSONL frames remain supported up to the defensive 16 MiB transport
+  bound, with bounded evidence and safe parsing;
+- normal execution has no Bridge deadline or inactivity watchdog;
+- explicit interrupt retains bounded child cleanup and short RPC transport
+  timers.
+
+### Validation checkpoint
+
+- `npm run typecheck`: PASS.
+- focused Codex executor tests: PASS.
+- focused MCP surface and binding tests: PASS.
+- full `npm test`: 363 total, 358 passed, 0 failed, 5 skipped.
+
 ## v1.4.2-biaogu.11
 
 This release adds a mechanical convergence circuit breaker for GOAL-managed

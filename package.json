@@ -1,7 +1,7 @@
 {
   "name": "engineering-bridge",
-  "version": "1.4.2-biaogu.11",
-  "description": "A local MCP bridge for supervised Codex tasks, read-only DSH tasks, and controlled patch application.",
+  "version": "1.4.2-biaogu.12",
+  "description": "A local MCP bridge for thin official Codex tasks and safe project binding.",
   "type": "module",
   "files": [
     "dist/src/**",
@@ -31,8 +31,7 @@
     "mcp",
     "codex",
     "local-first",
-    "read-only",
-    "controlled-patch"
+    "read-only"
   ],
   "license": "MIT",
   "devDependencies": {
