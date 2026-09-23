@@ -1,25 +1,23 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.12 is a local MCP STDIO transport for the
-official Codex CLI app-server. It binds existing projects under an approved
-root, starts Codex tasks, returns their state, and can interrupt a running
-task.
+Engineering Bridge 1.4.2-biaogu.13 is a local MCP STDIO transport for the
+official Codex CLI app-server. The CLI and its local configuration own model
+selection and native execution behavior. Bridge starts tasks, returns their
+state and output, and can interrupt a running task.
 
 The public MCP surface contains exactly four tools:
 
-- `bind_project(project_path, confirmation: "BIND")`
-- `run_task(workspace_id, instruction, model?, reasoning?)`
+- `bind_project(project_path, confirmation="BIND")`
+- `run_task(workspace_id, instruction)`
 - `task_result(task_id)`
-- `control_task(task_id, action: "interrupt")`
+- `control_task(task_id, action="interrupt")`
 
-`run_task` uses `gpt-5.6-luna` and `max` when the two optional model fields are
-omitted. Explicit values are passed to the Codex turn unchanged. The Bridge
-leaves every other app-server option absent so the official Codex defaults
-remain authoritative.
+Bridge does not send model selection or task policy overrides to the app-server.
+`thread/start` sends only the workspace cwd. `turn/start` sends only the native
+thread ID, user input, and workspace cwd.
 
-Task results report `running`, `completed`, or `failed` directly. A task that
-is interrupted ends as `failed` with a safe `TASK_INTERRUPTED` error and may
-include bounded partial output. Task supervision is process-local; the managed
+Task results report `running`, `completed`, or `failed`, with optional native
+thread ID, output, error, or partial output. Task state is process-local; the
 workspace binding is the only sidecar state retained across restarts.
 
 ## Configuration
@@ -58,11 +56,10 @@ An MCP client should launch:
 ```
 
 Codex is launched as `codex app-server --stdio` with the registered workspace
-as its working directory. JSONL input is parsed safely, valid frames up to the
-defensive 16 MiB transport bound are accepted, returned evidence is bounded,
-and short RPC responses have transport timers. Normal execution has no Bridge
-deadline or inactivity watchdog; interrupt cleanup is bounded so child
-processes cannot remain attached to the transport.
+as its working directory. Windows npm Codex shims are resolved to the official
+`codex.js` target without using a shell. JSONL frames are bounded at 16 MiB,
+RPC responses have transport timers, and interrupt cleanup is bounded so
+child processes cannot remain attached to the transport.
 
 ## Validation
 

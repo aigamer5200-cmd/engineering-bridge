@@ -1,6 +1,6 @@
 {
   "name": "engineering-bridge",
-  "version": "1.4.2-biaogu.12",
+  "version": "1.4.2-biaogu.13",
   "description": "A local MCP bridge for thin official Codex tasks and safe project binding.",
   "type": "module",
   "files": [

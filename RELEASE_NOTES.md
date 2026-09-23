@@ -1,5 +1,33 @@
 # Release notes
 
+## v1.4.2-biaogu.13
+
+The active Bridge path is a pure transport to the official Codex CLI
+app-server. The CLI and its local configuration own model selection and native
+behavior; Bridge sends no task policy overrides.
+
+### MCP contract
+
+- the public MCP surface remains `bind_project`, `run_task`, `task_result`,
+  and `control_task`;
+- `bind_project(project_path, confirmation="BIND")` returns only the workspace
+  ID and canonical root;
+- `run_task(workspace_id, instruction)` accepts only those two inputs;
+- `task_result` contains only task identity, state, executor, native thread ID,
+  output, and error fields;
+- `control_task(task_id, action="interrupt")` sends an explicit interrupt.
+
+### Codex transport
+
+- `thread/start` sends only the workspace cwd;
+- `turn/start` sends only the native thread ID, user input, and workspace cwd;
+- normal execution does not request a model list or send routing, execution,
+  approval, network, or search overrides;
+- official Windows npm Codex shim resolution remains supported;
+- process cleanup and RPC timeouts remain bounded to prevent leaked children.
+
+Version update and rollback remain external to Bridge runtime.
+
 ## v1.4.2-biaogu.12
 
 Phase 1 replaces the active Bridge composition with a thin official Codex

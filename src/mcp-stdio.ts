@@ -7,18 +7,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { CoreError, serializeError } from "./core/errors.js";
 import { VERSION } from "./version.js";
 import { ThinCodexTaskService } from "./tasks/thin-codex-task-service.js";
-import { ManagedWorkspaceCatalog } from "./workspaces/managed-workspace-catalog.js";
-import { RegisteredWorkspaceRegistry } from "./workspaces/registered-workspace-registry.js";
-import { WorkspaceOnboardingService } from "./workspaces/workspace-onboarding-service.js";
+import { WorkspaceDirectory } from "./transport/workspace-directory.js";
 
 const WorkspaceEntrySchema = z.object({
   id: z.string().min(1),
-  root: z.string().min(1),
-  allow_write: z.boolean().optional()
-}).strict();
+  root: z.string().min(1)
+});
 
 const ProjectRootEntrySchema = z.object({
   kind: z.literal("project_root"),
@@ -39,7 +35,11 @@ function jsonContent(value: unknown) {
 }
 
 function unknownTask() {
-  return { isError: true, ...jsonContent({ error: "UNKNOWN_TASK" }) };
+  return { isError: true, ...jsonContent({ error: "Task was not found." }) };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Request failed.";
 }
 
 function taskResultContent(view: ReturnType<ThinCodexTaskService["taskView"]>) {
@@ -48,13 +48,9 @@ function taskResultContent(view: ReturnType<ThinCodexTaskService["taskView"]>) {
     task_id: view.taskId,
     state: view.state,
     executor: "codex",
-    model: view.model,
-    reasoning: view.reasoning,
     ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
     ...(view.output === undefined ? {} : { output: view.output }),
     ...(view.partialOutput === undefined ? {} : { partial_output: view.partialOutput }),
-    evidence: view.evidence,
-    ...(view.diagnostics === undefined ? {} : { diagnostics: view.diagnostics }),
     ...(view.error === undefined ? {} : { error: view.error })
   });
 }
@@ -74,40 +70,30 @@ async function main(): Promise<void> {
   const projectRootEntries = parsed.filter(isProjectRootEntry);
   for (const entry of projectRootEntries) {
     if (!isAbsolute(entry.root) || normalize(entry.root) !== entry.root) {
-      throw new CoreError("WORKSPACE_BOUNDARY_VIOLATION");
+      throw new Error("Workspace configuration is invalid.");
     }
   }
 
-  const registry = new RegisteredWorkspaceRegistry(workspaceEntries);
-  const catalog = new ManagedWorkspaceCatalog(`${configPath}.managed-workspaces.json`);
-  await catalog.load();
-  for (const entry of catalog.entries()) {
-    try {
-      registry.registerManaged(entry.id, entry.root, entry.allowWrite);
-    } catch {
-      // Manual configuration remains authoritative for duplicate registrations.
-    }
-  }
-
-  const onboarding = new WorkspaceOnboardingService(
-    registry,
-    catalog,
-    projectRootEntries.map(({ root }) => root)
+  const workspaces = new WorkspaceDirectory(
+    workspaceEntries,
+    projectRootEntries.map(({ root }) => root),
+    `${configPath}.managed-workspaces.json`
   );
-  const tasks = new ThinCodexTaskService(registry);
+  await workspaces.load();
+  const tasks = new ThinCodexTaskService(workspaces);
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("bind_project", {
     description: "Register an existing local project inside a configured project_root.",
     inputSchema: z.object({
       project_path: z.string().min(1),
-      confirmation: z.literal("BIND")
+      confirmation: z.literal("BIND").default("BIND")
     }).strict()
   }, async ({ project_path }) => {
     try {
-      return jsonContent(await onboarding.bind({ project_path }));
+      return jsonContent(await workspaces.bind(project_path));
     } catch (error) {
-      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+      return { isError: true, ...jsonContent({ error: errorMessage(error) }) };
     }
   });
 
@@ -115,21 +101,14 @@ async function main(): Promise<void> {
     description: "Run one task through the official Codex app-server in a bound workspace.",
     inputSchema: z.object({
       workspace_id: z.string().min(1),
-      instruction: z.string().min(1),
-      model: z.string().trim().min(1).max(200).optional(),
-      reasoning: z.enum(["low", "medium", "high", "xhigh", "max", "ultra"]).optional()
+      instruction: z.string().min(1)
     }).strict()
-  }, async ({ workspace_id, instruction, model, reasoning }) => {
+  }, async ({ workspace_id, instruction }) => {
     try {
-      const { taskId } = tasks.startTask({
-        workspace_id,
-        instruction,
-        ...(model === undefined ? {} : { model }),
-        ...(reasoning === undefined ? {} : { reasoning })
-      });
+      const { taskId } = tasks.startTask({ workspace_id, instruction });
       return jsonContent({ task_id: taskId });
     } catch (error) {
-      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+      return { isError: true, ...jsonContent({ error: errorMessage(error) }) };
     }
   });
 
@@ -142,7 +121,7 @@ async function main(): Promise<void> {
     description: "Interrupt a running Codex task.",
     inputSchema: z.object({
       task_id: z.string(),
-      action: z.literal("interrupt")
+      action: z.literal("interrupt").default("interrupt")
     }).strict()
   }, async ({ task_id, action }) => {
     if (tasks.taskView(task_id) === undefined) return unknownTask();
@@ -150,7 +129,7 @@ async function main(): Promise<void> {
       const view = await tasks.controlTask(task_id, action);
       return jsonContent({ task_id: view.taskId, state: view.state });
     } catch (error) {
-      return { isError: true, ...jsonContent({ error: serializeError(error) }) };
+      return { isError: true, ...jsonContent({ error: errorMessage(error) }) };
     }
   });
 

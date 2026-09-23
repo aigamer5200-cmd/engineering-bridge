@@ -1,16 +1,12 @@
-import { CoreError, serializeError, type SerializedError } from "../core/errors.js";
 import { isId, newId, type Id } from "../core/ids.js";
-import { CodexExecutor, DEFAULT_CODEX_MODEL, DEFAULT_CODEX_REASONING } from "../executors/codex-executor.js";
-import type { Executor, ExecutorDiagnostics, ExecutorEvidence, ExecutorResult, ReasoningEffort } from "../executors/executor.js";
-import { RegisteredWorkspaceRegistry } from "../workspaces/registered-workspace-registry.js";
+import { CodexAppServerTransport } from "../transport/codex-app-server.js";
+import type { CodexTaskExecutor } from "../transport/codex-app-server.js";
 
 const MAX_TERMINAL_TASK_HISTORY = 100;
 
 export interface ThinCodexTaskRequest {
   readonly workspace_id: string;
   readonly instruction: string;
-  readonly model?: string;
-  readonly reasoning?: ReasoningEffort;
 }
 
 export type ThinCodexTaskState = "running" | "completed" | "failed";
@@ -18,51 +14,44 @@ export type ThinCodexTaskState = "running" | "completed" | "failed";
 export interface ThinCodexTaskView {
   readonly taskId: Id;
   readonly state: ThinCodexTaskState;
-  readonly model: string;
-  readonly reasoning: string;
   readonly threadId?: string;
   readonly output?: string;
-  readonly error?: SerializedError;
+  readonly error?: string;
   readonly partialOutput?: string;
-  readonly evidence: readonly ExecutorEvidence[];
-  readonly diagnostics?: ExecutorDiagnostics;
 }
 
-export type ThinCodexExecutorFactory = (workspaceRoot: string) => Executor;
+export type ThinCodexExecutorFactory = (workspaceRoot: string) => CodexTaskExecutor;
 
 type ThinCodexTaskRecord = {
   state: ThinCodexTaskState;
   instruction: string;
-  model: string;
-  reasoning: ReasoningEffort;
-  executor: Executor;
-  threadId?: string | undefined;
+  executor: CodexTaskExecutor;
+  threadId?: string;
   output?: string;
-  error?: SerializedError;
+  error?: string;
   partialOutput?: string;
-  evidence: readonly ExecutorEvidence[];
-  diagnostics?: ExecutorDiagnostics | undefined;
 };
+
+export interface WorkspaceResolver {
+  resolve(workspaceId: string): string;
+}
 
 export class ThinCodexTaskService {
   private readonly tasks = new Map<Id, ThinCodexTaskRecord>();
   private readonly terminalTaskIds: Id[] = [];
 
   constructor(
-    private readonly registry: RegisteredWorkspaceRegistry,
-    private readonly executorFactory: ThinCodexExecutorFactory = (workspaceRoot) => new CodexExecutor(workspaceRoot)
+    private readonly workspaces: WorkspaceResolver,
+    private readonly executorFactory: ThinCodexExecutorFactory = (workspaceRoot) => new CodexAppServerTransport(workspaceRoot)
   ) {}
 
   startTask(request: ThinCodexTaskRequest): { taskId: Id } {
-    const workspaceRoot = this.registry.resolve(request.workspace_id);
+    const workspaceRoot = this.workspaces.resolve(request.workspace_id);
     const taskId = newId();
     const record: ThinCodexTaskRecord = {
       state: "running",
       instruction: request.instruction,
-      model: request.model ?? DEFAULT_CODEX_MODEL,
-      reasoning: request.reasoning ?? DEFAULT_CODEX_REASONING,
-      executor: this.executorFactory(workspaceRoot),
-      evidence: []
+      executor: this.executorFactory(workspaceRoot)
     };
     this.tasks.set(taskId, record);
     queueMicrotask(() => void this.execute(taskId, record));
@@ -76,53 +65,42 @@ export class ThinCodexTaskService {
     return {
       taskId,
       state: record.state,
-      model: record.model,
-      reasoning: record.reasoning,
       ...(record.threadId === undefined ? {} : { threadId: record.threadId }),
       ...(record.output === undefined ? {} : { output: record.output }),
       ...(record.error === undefined ? {} : { error: record.error }),
-      ...(record.partialOutput === undefined ? {} : { partialOutput: record.partialOutput }),
-      evidence: record.evidence,
-      ...(record.diagnostics === undefined ? {} : { diagnostics: record.diagnostics })
+      ...(record.partialOutput === undefined ? {} : { partialOutput: record.partialOutput })
     };
   }
 
   async controlTask(taskId: unknown, action: "interrupt"): Promise<ThinCodexTaskView> {
-    if (action !== "interrupt" || !isId(taskId)) throw new CoreError("INVALID_STATE_TRANSITION");
+    if (action !== "interrupt" || !isId(taskId)) throw new Error("Task cannot be interrupted.");
     const record = this.tasks.get(taskId);
-    if (record === undefined || record.state !== "running" || record.executor.interrupt === undefined) {
-      throw new CoreError("INVALID_STATE_TRANSITION");
-    }
+    if (record === undefined || record.state !== "running") throw new Error("Task cannot be interrupted.");
     await record.executor.interrupt();
-    return this.taskView(taskId)!;
+    const view = this.taskView(taskId);
+    if (view === undefined) throw new Error("Task was not found.");
+    return view;
   }
 
   private async execute(taskId: Id, record: ThinCodexTaskRecord): Promise<void> {
     try {
-      const result = await record.executor.execute({
-        taskId,
-        instruction: record.instruction,
-        model: record.model,
-        reasoning: record.reasoning,
-        onEvidence: (evidence) => { record.evidence = evidence; }
-      });
-      record.threadId = result.threadId;
-      record.diagnostics = result.diagnostics;
-      if (result.evidence !== undefined) record.evidence = result.evidence;
+      const result = await record.executor.execute({ instruction: record.instruction });
+      if (result.threadId !== undefined) record.threadId = result.threadId;
       if (result.kind === "completed") {
         record.state = "completed";
         record.output = result.output;
-      } else if (result.kind === "failed") {
+      } else if (result.kind === "interrupted") {
         record.state = "failed";
-        record.error = result.error;
+        record.error = "Task was interrupted.";
+        if (result.output !== "") record.partialOutput = result.output;
       } else {
         record.state = "failed";
-        record.error = serializeError(new CoreError("TASK_INTERRUPTED"));
-        if (result.output !== "") record.partialOutput = result.output;
+        record.error = result.error;
+        if (result.output !== undefined && result.output !== "") record.partialOutput = result.output;
       }
     } catch (error) {
       record.state = "failed";
-      record.error = serializeError(error);
+      record.error = error instanceof Error ? error.message : "Codex task failed.";
     } finally {
       if (record.state !== "running") {
         this.terminalTaskIds.push(taskId);

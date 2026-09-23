@@ -1,23 +1,21 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.12 是一個本機 MCP STDIO transport，直接連接
-官方 Codex CLI app-server。它可以在核准的 project root 內綁定既有專案、啟動
-Codex task、讀取 task 狀態，並中斷執行中的 task。
+Engineering Bridge 1.4.2-biaogu.13 是一個本機 MCP STDIO transport，直接連接
+官方 Codex CLI app-server。Codex CLI 與本機設定負責模型選擇及原生執行行為；
+Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中的 task。
 
 公開 MCP tool surface 嚴格只有四個：
 
-- `bind_project(project_path, confirmation: "BIND")`
-- `run_task(workspace_id, instruction, model?, reasoning?)`
+- `bind_project(project_path, confirmation="BIND")`
+- `run_task(workspace_id, instruction)`
 - `task_result(task_id)`
-- `control_task(task_id, action: "interrupt")`
+- `control_task(task_id, action="interrupt")`
 
-`run_task` 省略 model 或 reasoning 時使用 `gpt-5.6-luna` 與 `max`；明確提供的
-值會原樣傳給 Codex turn。其他 app-server 選項保持省略，交由官方 Codex 預設值
-處理。
+Bridge 不會將模型選擇或 task policy override 傳入 app-server。`thread/start` 只傳送
+workspace cwd；`turn/start` 只傳送 thread ID、使用者輸入及 workspace cwd。
 
-`task_result` 直接回傳 `running`、`completed` 或 `failed`。中斷後的 task 會以
-安全的 `TASK_INTERRUPTED` 錯誤結束，必要時附帶受限的 partial output。task 狀態
-只保留在目前 Bridge process；workspace binding 會保存到 sidecar。
+`task_result` 只回傳 task ID、狀態、executor、thread ID、輸出或錯誤。task 狀態只
+保留在目前 Bridge process；workspace binding 會保存到 sidecar。
 
 ## 設定
 
@@ -54,8 +52,8 @@ MCP client 啟動方式：
 ```
 
 Codex 以 `codex app-server --stdio` 啟動，working directory 是已綁定的
-workspace。Bridge 支援分段 JSONL frame、安全解析與最多 16 MiB 的 transport
-frame，並限制回傳 evidence。一般執行沒有 Bridge deadline 或 inactivity watchdog；
+workspace。Bridge 會安全解析最多 16 MiB 的 JSONL frame，並原樣回傳 final agent
+output；Pure Transport 不提供 evidence。一般執行沒有 Bridge deadline 或 inactivity watchdog；
 只有 explicit interrupt 會觸發受限的 child cleanup。
 
 ## 驗證
