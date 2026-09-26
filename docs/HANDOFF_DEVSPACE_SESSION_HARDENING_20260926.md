@@ -2,10 +2,11 @@
 
 ## Checkpoint
 
-- Branch: `fix/devspace-session-hardening`
+- Integration target: `main`
 - Baseline checkpoint: `e89b6df` (`refactor(bridge): reduce runtime to pure Codex transport`)
 - Implementation checkpoint: `70ab821` (`fix: harden DevSpace process session replay`).
-- This HANDOFF closeout update follows that implementation commit on the same branch and is intended to be pushed with it.
+- Branch closeout checkpoint: `68b3dfd` (`docs: close DevSpace session hardening handoff`).
+- Owner-authorized I/W completed by ff-only integration of `fix/devspace-session-hardening` into `main`.
 - Scope: an explicit, user-supplied `@waishnav/devspace` 1.0.8 `dist/process-sessions.js` path only.
 
 ## Completed
@@ -48,10 +49,18 @@
 - The actual published `@waishnav/devspace@1.0.8` module was copied to a temporary probe path outside this worktree: dry-run, apply, exact reread verification, and a single backup all passed. No live DevSpace path was accessed.
 - Independent DS rerun of the focused suite after Codex completion: 4/4 PASS.
 - `git diff --check`: PASS before live rollout.
+- Post-I/W main regression: 4/4 PASS.
+- Post-I/W live `--verify`: PASS.
+- Post-I/W production health: local PASS, public PASS, guard PASS, canary stopped.
 
-## Pending
+## I/W completion
 
-1. Merge/integrate only under the normal Owner I/W flow; the live DevSpace runtime is already patched and accepted independently of repo integration.
+- Integration mode: ff-only.
+- Force push: NO.
+- Merge commit: NO.
+- Integrated source tip: `68b3dfd`.
+- Main remains the canonical repo authority after push.
+- The live DevSpace runtime is already patched and accepted independently of repo integration.
 
 ## Rollback
 
@@ -61,11 +70,10 @@
 
 ## Do not touch
 
-- Do not access or mutate live DevSpace from this worktree handoff.
-- Do not restart services, send Telegram, commit, push, change package dependencies, or broaden the source transform.
+- Do not broaden the source transform.
 - Do not change running-session, workspace ownership, interrupt, PTY, buffer, or `exec` semantics.
 - Do not patch any path discovered implicitly; the target must be supplied explicitly by the operator.
 
 ## Next explicit task
 
-Close out the repo phase with selective C/P, then continue normal project work. If the Web GPT platform pauses tool orchestration again, the live DevSpace 1.0.8 runtime now retains and replays completed session results for up to 60 minutes instead of invalidating the session immediately after the first terminal poll.
+Continue normal project work. If the Web GPT platform pauses tool orchestration again, the live DevSpace 1.0.8 runtime now retains and replays completed session results for up to 60 minutes instead of invalidating the session immediately after the first terminal poll.
