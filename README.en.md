@@ -1,6 +1,6 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.13 is a local MCP STDIO transport for the
+Engineering Bridge 1.4.2-biaogu.14 is a local MCP STDIO transport for the
 official Codex CLI app-server. The CLI and its local configuration own model
 selection and native execution behavior. Bridge starts tasks, returns their
 state and output, and can interrupt a running task.
@@ -11,6 +11,13 @@ The public MCP surface contains exactly four tools:
 - `run_task(workspace_id, instruction)`
 - `task_result(task_id)`
 - `control_task(task_id, action="interrupt")`
+
+All four tools publish standard MCP ToolAnnotations so MCP hosts can distinguish
+read-only, destructive, idempotent, and open-world behavior. `task_result` is
+explicitly read-only and closed-world; `bind_project` only adds local workspace
+catalog state; `run_task` truthfully declares that it may modify the workspace
+and that native Codex permissions may reach external resources. These annotations
+are client hints, not security boundaries.
 
 Bridge does not send model selection or task policy overrides to the app-server.
 `thread/start` sends only the workspace cwd. `turn/start` sends only the native

@@ -48,6 +48,34 @@ test("MCP exposes exactly the Phase 1 thin tool surface", async () => {
       "task_result"
     ]);
 
+    const annotations = new Map(listed.tools.map((tool) => [tool.name, tool.annotations]));
+    assert.deepEqual(annotations.get("bind_project"), {
+      title: "Bind Project",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
+    assert.deepEqual(annotations.get("run_task"), {
+      title: "Run Codex Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true
+    });
+    assert.deepEqual(annotations.get("task_result"), {
+      title: "Read Codex Task Result",
+      readOnlyHint: true,
+      openWorldHint: false
+    });
+    assert.deepEqual(annotations.get("control_task"), {
+      title: "Interrupt Codex Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false
+    });
+
     const schemas = new Map(listed.tools.map((tool) => [tool.name, tool.inputSchema as {
       properties?: Record<string, { type?: string; const?: unknown; default?: unknown; enum?: unknown[] }>;
       required?: string[];

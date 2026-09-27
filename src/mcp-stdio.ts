@@ -84,7 +84,14 @@ async function main(): Promise<void> {
   const server = new McpServer({ name: "engineering-bridge", version: VERSION });
 
   server.registerTool("bind_project", {
-    description: "Register an existing local project inside a configured project_root.",
+    description: "Register an existing local project inside a configured project_root. This updates only the Bridge workspace catalog and does not modify project files.",
+    annotations: {
+      title: "Bind Project",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: z.object({
       project_path: z.string().min(1),
       confirmation: z.literal("BIND").default("BIND")
@@ -98,7 +105,14 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("run_task", {
-    description: "Run one task through the official Codex app-server in a bound workspace.",
+    description: "Start one task through the official Codex app-server in a bound local workspace. The task may modify workspace files according to the instruction and Codex's own local permissions.",
+    annotations: {
+      title: "Run Codex Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true
+    },
     inputSchema: z.object({
       workspace_id: z.string().min(1),
       instruction: z.string().min(1)
@@ -113,12 +127,24 @@ async function main(): Promise<void> {
   });
 
   server.registerTool("task_result", {
-    description: "Read the current or terminal result for a Codex task.",
+    description: "Read the current or terminal result for an existing local Codex task. This does not execute commands or modify files.",
+    annotations: {
+      title: "Read Codex Task Result",
+      readOnlyHint: true,
+      openWorldHint: false
+    },
     inputSchema: z.object({ task_id: z.string() }).strict()
   }, ({ task_id }) => taskResultContent(tasks.taskView(task_id)));
 
   server.registerTool("control_task", {
-    description: "Interrupt a running Codex task.",
+    description: "Request interruption of an existing running local Codex task. This does not start a new task.",
+    annotations: {
+      title: "Interrupt Codex Task",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: z.object({
       task_id: z.string(),
       action: z.literal("interrupt").default("interrupt")

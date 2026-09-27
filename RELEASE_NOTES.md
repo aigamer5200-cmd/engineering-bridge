@@ -1,5 +1,24 @@
 # Release notes
 
+## v1.4.2-biaogu.14
+
+This release adds explicit MCP ToolAnnotations to the unchanged four-tool thin
+Bridge surface so MCP hosts do not need to infer tool behavior from names alone.
+
+### Tool behavior metadata
+
+- `bind_project`: write-capable but additive, idempotent, closed-world;
+- `run_task`: write-capable, potentially destructive, non-idempotent, open-world;
+- `task_result`: read-only and closed-world;
+- `control_task`: write-capable task interruption, potentially destructive,
+  idempotent in environmental effect, closed-world;
+- descriptions now state the local/project mutation boundary more explicitly;
+- no MCP tool was added or removed, and the app-server transport contract is
+  unchanged.
+
+The annotations are protocol hints for MCP clients. They do not bypass or weaken
+client-side safety checks and do not change Bridge or Codex permissions.
+
 ## v1.4.2-biaogu.13
 
 The active Bridge path is a pure transport to the official Codex CLI

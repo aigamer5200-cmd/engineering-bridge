@@ -1,6 +1,6 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.13 是一個本機 MCP STDIO transport，直接連接
+Engineering Bridge 1.4.2-biaogu.14 是一個本機 MCP STDIO transport，直接連接
 官方 Codex CLI app-server。Codex CLI 與本機設定負責模型選擇及原生執行行為；
 Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中的 task。
 
@@ -10,6 +10,11 @@ Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中�
 - `run_task(workspace_id, instruction)`
 - `task_result(task_id)`
 - `control_task(task_id, action="interrupt")`
+
+四個工具均提供標準 MCP ToolAnnotations，讓 MCP host 能明確辨識唯讀、破壞性、
+冪等與 open-world 行為。`task_result` 明確宣告為唯讀且封閉世界；`bind_project`
+只新增本機 workspace catalog 狀態；`run_task` 則如實宣告可能修改 workspace，且
+Codex 原生權限可能接觸外部資源。這些 annotations 是 client 行為提示，不是安全邊界。
 
 Bridge 不會將模型選擇或 task policy override 傳入 app-server。`thread/start` 只傳送
 workspace cwd；`turn/start` 只傳送 thread ID、使用者輸入及 workspace cwd。
