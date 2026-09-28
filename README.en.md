@@ -1,6 +1,6 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.14 is a local MCP STDIO transport for the
+Engineering Bridge 1.4.2-biaogu.15 is a local MCP STDIO transport for the
 official Codex CLI app-server. The CLI and its local configuration own model
 selection and native execution behavior. Bridge starts tasks, returns their
 state and output, and can interrupt a running task.
@@ -8,7 +8,7 @@ state and output, and can interrupt a running task.
 The public MCP surface contains exactly four tools:
 
 - `bind_project(project_path, confirmation="BIND")`
-- `run_task(workspace_id, instruction)`
+- `run_task(workspace_id, instruction, model?, reasoning?, service_tier?)`
 - `task_result(task_id)`
 - `control_task(task_id, action="interrupt")`
 
@@ -19,13 +19,16 @@ catalog state; `run_task` truthfully declares that it may modify the workspace
 and that native Codex permissions may reach external resources. These annotations
 are client hints, not security boundaries.
 
-Bridge does not send model selection or task policy overrides to the app-server.
-`thread/start` sends only the workspace cwd. `turn/start` sends only the native
-thread ID, user input, and workspace cwd.
+Bridge does not infer GOAL roles or choose routing defaults. Optional
+`model`, `reasoning`, and `service_tier` inputs are task-local passthrough only:
+when omitted, the native starts retain the existing minimal payload; when
+provided, Bridge forwards `model`/`serviceTier` to `thread/start` and
+`model`/`serviceTier`/`effort` to `turn/start`.
 
 Task results report `running`, `completed`, or `failed`, with optional native
-thread ID, output, error, or partial output. Task state is process-local; the
-workspace binding is the only sidecar state retained across restarts.
+thread ID, output, error, partial output, and only the explicitly requested
+non-secret routing provenance. Task state is process-local; the workspace
+binding is the only sidecar state retained across restarts.
 
 ## Configuration
 

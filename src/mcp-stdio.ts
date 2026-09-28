@@ -48,6 +48,9 @@ function taskResultContent(view: ReturnType<ThinCodexTaskService["taskView"]>) {
     task_id: view.taskId,
     state: view.state,
     executor: "codex",
+    ...(view.model === undefined ? {} : { model: view.model }),
+    ...(view.reasoning === undefined ? {} : { reasoning: view.reasoning }),
+    ...(view.service_tier === undefined ? {} : { service_tier: view.service_tier }),
     ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
     ...(view.output === undefined ? {} : { output: view.output }),
     ...(view.partialOutput === undefined ? {} : { partial_output: view.partialOutput }),
@@ -115,11 +118,20 @@ async function main(): Promise<void> {
     },
     inputSchema: z.object({
       workspace_id: z.string().min(1),
-      instruction: z.string().min(1)
+      instruction: z.string().min(1),
+      model: z.string().min(1).optional(),
+      reasoning: z.string().min(1).optional(),
+      service_tier: z.string().min(1).optional()
     }).strict()
-  }, async ({ workspace_id, instruction }) => {
+  }, async ({ workspace_id, instruction, model, reasoning, service_tier }) => {
     try {
-      const { taskId } = tasks.startTask({ workspace_id, instruction });
+      const { taskId } = tasks.startTask({
+        workspace_id,
+        instruction,
+        ...(model === undefined ? {} : { model }),
+        ...(reasoning === undefined ? {} : { reasoning }),
+        ...(service_tier === undefined ? {} : { service_tier })
+      });
       return jsonContent({ task_id: taskId });
     } catch (error) {
       return { isError: true, ...jsonContent({ error: errorMessage(error) }) };

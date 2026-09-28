@@ -7,6 +7,9 @@ const MAX_TERMINAL_TASK_HISTORY = 100;
 export interface ThinCodexTaskRequest {
   readonly workspace_id: string;
   readonly instruction: string;
+  readonly model?: string;
+  readonly reasoning?: string;
+  readonly service_tier?: string;
 }
 
 export type ThinCodexTaskState = "running" | "completed" | "failed";
@@ -14,6 +17,9 @@ export type ThinCodexTaskState = "running" | "completed" | "failed";
 export interface ThinCodexTaskView {
   readonly taskId: Id;
   readonly state: ThinCodexTaskState;
+  readonly model?: string;
+  readonly reasoning?: string;
+  readonly service_tier?: string;
   readonly threadId?: string;
   readonly output?: string;
   readonly error?: string;
@@ -26,6 +32,9 @@ type ThinCodexTaskRecord = {
   state: ThinCodexTaskState;
   instruction: string;
   executor: CodexTaskExecutor;
+  model?: string;
+  reasoning?: string;
+  service_tier?: string;
   threadId?: string;
   output?: string;
   error?: string;
@@ -51,7 +60,10 @@ export class ThinCodexTaskService {
     const record: ThinCodexTaskRecord = {
       state: "running",
       instruction: request.instruction,
-      executor: this.executorFactory(workspaceRoot)
+      executor: this.executorFactory(workspaceRoot),
+      ...(request.model === undefined ? {} : { model: request.model }),
+      ...(request.reasoning === undefined ? {} : { reasoning: request.reasoning }),
+      ...(request.service_tier === undefined ? {} : { service_tier: request.service_tier })
     };
     this.tasks.set(taskId, record);
     queueMicrotask(() => void this.execute(taskId, record));
@@ -65,6 +77,9 @@ export class ThinCodexTaskService {
     return {
       taskId,
       state: record.state,
+      ...(record.model === undefined ? {} : { model: record.model }),
+      ...(record.reasoning === undefined ? {} : { reasoning: record.reasoning }),
+      ...(record.service_tier === undefined ? {} : { service_tier: record.service_tier }),
       ...(record.threadId === undefined ? {} : { threadId: record.threadId }),
       ...(record.output === undefined ? {} : { output: record.output }),
       ...(record.error === undefined ? {} : { error: record.error }),
@@ -84,7 +99,12 @@ export class ThinCodexTaskService {
 
   private async execute(taskId: Id, record: ThinCodexTaskRecord): Promise<void> {
     try {
-      const result = await record.executor.execute({ instruction: record.instruction });
+      const result = await record.executor.execute({
+        instruction: record.instruction,
+        ...(record.model === undefined ? {} : { model: record.model }),
+        ...(record.reasoning === undefined ? {} : { reasoning: record.reasoning }),
+        ...(record.service_tier === undefined ? {} : { service_tier: record.service_tier })
+      });
       if (result.threadId !== undefined) record.threadId = result.threadId;
       if (result.kind === "completed") {
         record.state = "completed";

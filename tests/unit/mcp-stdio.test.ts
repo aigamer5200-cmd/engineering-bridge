@@ -82,6 +82,9 @@ test("MCP exposes exactly the Phase 1 thin tool surface", async () => {
     }]));
     assert.deepEqual(Object.keys(schemas.get("run_task")?.properties ?? {}).sort(), [
       "instruction",
+      "model",
+      "reasoning",
+      "service_tier",
       "workspace_id"
     ]);
     assert.deepEqual(Object.keys(schemas.get("control_task")?.properties ?? {}).sort(), ["action", "task_id"]);
@@ -91,12 +94,16 @@ test("MCP exposes exactly the Phase 1 thin tool surface", async () => {
     assert.equal(schemas.get("bind_project")?.properties?.confirmation?.default, "BIND");
     assert.deepEqual(schemas.get("run_task")?.required?.sort(), ["instruction", "workspace_id"]);
 
-    assert.equal(JSON.stringify(listed.tools).includes("model"), false);
-    assert.equal(JSON.stringify(listed.tools).includes("reasoning"), false);
+    assert.equal(schemas.get("run_task")?.properties?.model?.type, "string");
+    assert.equal(schemas.get("run_task")?.properties?.reasoning?.type, "string");
+    assert.equal(schemas.get("run_task")?.properties?.service_tier?.type, "string");
 
     const run = await call(client, "run_task", {
       workspace_id: "missing",
-      instruction: "inspect"
+      instruction: "inspect",
+      model: "gpt-5.6-custom",
+      reasoning: "high",
+      service_tier: "priority"
     });
     assert.equal(run.isError, true);
     assert.equal("task_id" in run.body, false);

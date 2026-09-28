@@ -1,5 +1,22 @@
 # Release notes
 
+## v1.4.2-biaogu.15
+
+This release adds a minimal task-local routing passthrough to the active thin
+Codex transport without adding Bridge-owned defaults or policy.
+
+### Routing passthrough
+
+- `run_task` accepts optional `model`, `reasoning`, and `service_tier` fields;
+- omitted fields remain absent from native `thread/start` and `turn/start`, so
+  Codex and its local configuration retain native behavior;
+- explicit `model` and `service_tier` are forwarded as `model` and
+  `serviceTier` to both native starts, while `reasoning` is forwarded as
+  `effort` to `turn/start`;
+- `task_result` exposes only explicitly requested routing provenance;
+- the public MCP surface remains exactly four tools and existing annotations
+  are unchanged.
+
 ## v1.4.2-biaogu.14
 
 This release adds explicit MCP ToolAnnotations to the unchanged four-tool thin

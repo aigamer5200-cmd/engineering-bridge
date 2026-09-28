@@ -72,7 +72,7 @@ function messages(invocation: Invocation): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-test("sends only workspace and input fields to the official app-server", async () => {
+test("omitted routing remains byte-for-byte minimal on the official app-server", async () => {
   const invocations: Invocation[] = [];
   const inheritedEnvironment = {
     PATH: "C:\\bin",
@@ -112,6 +112,14 @@ test("sends only workspace and input fields to the official app-server", async (
     input: [{ type: "text", text: "inspect" }],
     cwd: WORKSPACE
   });
+  assert.equal(JSON.stringify(allMessages.find((message) => message.method === "thread/start")?.params),
+    JSON.stringify({ cwd: WORKSPACE }));
+  assert.equal(JSON.stringify(allMessages.find((message) => message.method === "turn/start")?.params),
+    JSON.stringify({
+      threadId: "thread-1",
+      input: [{ type: "text", text: "inspect" }],
+      cwd: WORKSPACE
+    }));
 
   const serialized = JSON.stringify(allMessages);
   for (const forbidden of [
@@ -120,6 +128,39 @@ test("sends only workspace and input fields to the official app-server", async (
   ]) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
   }
+});
+
+test("forwards explicit model, service tier, and reasoning exactly through native fields", async () => {
+  const invocations: Invocation[] = [];
+  const transport = new CodexAppServerTransport(
+    WORKSPACE,
+    fakeStarter(invocations),
+    { PATH: "C:\\bin" },
+    "win32"
+  );
+
+  const result = await transport.execute({
+    instruction: "inspect",
+    model: "gpt-5.6-custom",
+    reasoning: "high",
+    service_tier: "priority"
+  });
+
+  assert.deepEqual(result, { kind: "completed", output: "transport-ok", threadId: "thread-1" });
+  const invocation = invocations[0]!;
+  assert.deepEqual(messages(invocation).find((message) => message.method === "thread/start")?.params, {
+    cwd: WORKSPACE,
+    model: "gpt-5.6-custom",
+    serviceTier: "priority"
+  });
+  assert.deepEqual(messages(invocation).find((message) => message.method === "turn/start")?.params, {
+    threadId: "thread-1",
+    input: [{ type: "text", text: "inspect" }],
+    cwd: WORKSPACE,
+    model: "gpt-5.6-custom",
+    serviceTier: "priority",
+    effort: "high"
+  });
 });
 
 test("returns agent output longer than the former 65K limit intact", async () => {

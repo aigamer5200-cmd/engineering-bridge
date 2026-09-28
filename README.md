@@ -1,13 +1,13 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.14 是一個本機 MCP STDIO transport，直接連接
+Engineering Bridge 1.4.2-biaogu.15 是一個本機 MCP STDIO transport，直接連接
 官方 Codex CLI app-server。Codex CLI 與本機設定負責模型選擇及原生執行行為；
 Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中的 task。
 
 公開 MCP tool surface 嚴格只有四個：
 
 - `bind_project(project_path, confirmation="BIND")`
-- `run_task(workspace_id, instruction)`
+- `run_task(workspace_id, instruction, model?, reasoning?, service_tier?)`
 - `task_result(task_id)`
 - `control_task(task_id, action="interrupt")`
 
@@ -16,11 +16,15 @@ Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中�
 只新增本機 workspace catalog 狀態；`run_task` 則如實宣告可能修改 workspace，且
 Codex 原生權限可能接觸外部資源。這些 annotations 是 client 行為提示，不是安全邊界。
 
-Bridge 不會將模型選擇或 task policy override 傳入 app-server。`thread/start` 只傳送
-workspace cwd；`turn/start` 只傳送 thread ID、使用者輸入及 workspace cwd。
+Bridge 不會推論 GOAL role 或選擇 routing default。`run_task` 可選擇性接收
+`model`、`reasoning` 與 `service_tier`；省略時不在 native `thread/start` 或
+`turn/start` 加入對應欄位，明確提供時則原樣轉送為 `model`、`effort` 與
+`serviceTier`。這些是 task-local passthrough，不包含 account、profile 或其他
+治理與 policy layer。
 
 `task_result` 只回傳 task ID、狀態、executor、thread ID、輸出或錯誤。task 狀態只
-保留在目前 Bridge process；workspace binding 會保存到 sidecar。
+保留在目前 Bridge process；workspace binding 會保存到 sidecar；caller 明確提供的
+`model`、`reasoning`、`service_tier` 會作為非機密 routing provenance 一併回傳。
 
 ## 設定
 

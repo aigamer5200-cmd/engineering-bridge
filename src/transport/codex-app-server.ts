@@ -9,8 +9,15 @@ export type CodexTaskResult =
   | { readonly kind: "interrupted"; readonly output: string; readonly threadId?: string }
   | { readonly kind: "failed"; readonly error: string; readonly output?: string; readonly threadId?: string };
 
+export interface CodexTaskRequest {
+  readonly instruction: string;
+  readonly model?: string;
+  readonly reasoning?: string;
+  readonly service_tier?: string;
+}
+
 export interface CodexTaskExecutor {
-  execute(request: { readonly instruction: string }): Promise<CodexTaskResult>;
+  execute(request: CodexTaskRequest): Promise<CodexTaskResult>;
   interrupt(): Promise<void>;
 }
 
@@ -106,7 +113,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     private readonly timing: TransportTiming = DEFAULT_TIMING
   ) {}
 
-  async execute(request: { readonly instruction: string }): Promise<CodexTaskResult> {
+  async execute(request: CodexTaskRequest): Promise<CodexTaskResult> {
     if (this.child !== undefined) return { kind: "failed", error: "Codex task is already running." };
     this.threadId = undefined;
     this.turnId = undefined;
@@ -352,7 +359,11 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     try {
       await this.call("initialize", { clientInfo: { name: "engineering-bridge", version: VERSION } });
       this.notify("initialized", {});
-      const threadResult = await this.call("thread/start", { cwd: this.workspaceRoot });
+      const routingParams = {
+        ...(request.model === undefined ? {} : { model: request.model }),
+        ...(request.service_tier === undefined ? {} : { serviceTier: request.service_tier })
+      };
+      const threadResult = await this.call("thread/start", { cwd: this.workspaceRoot, ...routingParams });
       if (!object(threadResult) || !object(threadResult.thread) || typeof threadResult.thread.id !== "string") {
         throw new Error("Invalid thread response.");
       }
@@ -360,7 +371,9 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
       const turnResult = await this.call("turn/start", {
         threadId: this.threadId,
         input: [{ type: "text", text: request.instruction }],
-        cwd: this.workspaceRoot
+        cwd: this.workspaceRoot,
+        ...routingParams,
+        ...(request.reasoning === undefined ? {} : { effort: request.reasoning })
       });
       if (!object(turnResult) || !object(turnResult.turn) || typeof turnResult.turn.id !== "string") {
         throw new Error("Invalid task response.");
