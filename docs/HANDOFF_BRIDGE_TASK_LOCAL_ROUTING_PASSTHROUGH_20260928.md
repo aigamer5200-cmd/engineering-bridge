@@ -87,6 +87,13 @@ defaults.
   `1.4.2-biaogu.15` on port `8768`; verified production PID was `25620`.
 - `manage_bridge_painless_upgrade.py verify`: PASS after switch. Recorded
   previous/rollback version remains `1.4.2-biaogu.14`.
+- Authenticated production MCP smoke against port `8768`: PASS. Production
+  reported server version `1.4.2-biaogu.15`, exactly four tools, and explicit
+  `gpt-5.6-luna` / `max` / `priority` routing provenance with an unchanged
+  sandbox.
+- A second authenticated production smoke for the reserved GOAL A route also
+  PASS: exact `gpt-6-astra` / `low` / `standard`, with matching returned
+  provenance and an unchanged sandbox.
 - The already-open ChatGPT Engineering Bridge connector in the supervising
   conversation still exposes the cached pre-.15 `run_task(workspace_id,
   instruction)` schema and therefore rejects the three new fields before the
@@ -103,6 +110,6 @@ defaults.
   `f663b657507ea44a992c226a6e4041fce4916a21`, and repository state without
   relying on the prior native Codex thread/session.
 - Production is now `.15`; do not remove `.14` rollback capability.
-- The only remaining acceptance item is refreshing/reconnecting the ChatGPT
-  Engineering Bridge connector so its discovered schema exposes the three new
-  optional fields, followed by one bounded explicit-routing production smoke.
+- Backend production acceptance is complete. The only remaining UI/session
+  item is refreshing/reconnecting the already-open ChatGPT Engineering Bridge
+  connector so its discovered schema exposes the three new optional fields.
