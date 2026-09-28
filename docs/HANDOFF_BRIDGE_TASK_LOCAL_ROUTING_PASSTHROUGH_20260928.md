@@ -66,6 +66,34 @@ defaults.
   `thread/start` accepts `model` / `serviceTier` and `turn/start` accepts
   `model` / `serviceTier` / `effort`.
 
+## I/W / production activation
+
+- Owner authorized I/W on 2026-09-28.
+- `main / origin/main` fast-forwarded to
+  `dd4d87f8cae0dfec16b43e2d9264fb7f7520c04f` before production promotion.
+- Candidate `1.4.2-biaogu.15` initially failed only because the external thin
+  canary validator still expected omitted tasks to report the old default
+  model/reasoning provenance (`unexpected default profile`). Source tests and
+  candidate runtime were otherwise healthy.
+- The external runtime canary validator was repaired to be schema-aware while
+  preserving rollback compatibility: legacy four-tool runtimes keep the old
+  omitted-default assertion; runtimes exposing `model` / `reasoning` /
+  `service_tier` must keep omitted provenance absent and pass a second explicit
+  Luna/MAX/priority routed task.
+- Re-run canary: PASS. It proved the four-tool schema, omitted-routing behavior,
+  explicit `gpt-5.6-luna` / `max` / `priority` provenance, real Codex execution,
+  and an unchanged sandbox.
+- Guarded production switch: PASS. Production is now
+  `1.4.2-biaogu.15` on port `8768`; verified production PID was `25620`.
+- `manage_bridge_painless_upgrade.py verify`: PASS after switch. Recorded
+  previous/rollback version remains `1.4.2-biaogu.14`.
+- The already-open ChatGPT Engineering Bridge connector in the supervising
+  conversation still exposes the cached pre-.15 `run_task(workspace_id,
+  instruction)` schema and therefore rejects the three new fields before the
+  request reaches production. This is connector-schema cache, not a backend
+  rollback signal. Refresh/reconnect the Engineering Bridge connector, then run
+  one explicit routed task and verify returned provenance.
+
 ## Pending / constraints
 
 - Do not modify legacy `CodexExecutor` routing, governance modules, account or
@@ -74,9 +102,7 @@ defaults.
 - Another Web GPT/Codex account/session can continue from this handoff,
   `f663b657507ea44a992c226a6e4041fce4916a21`, and repository state without
   relying on the prior native Codex thread/session.
-- Production remains `1.4.2-biaogu.14`. Do not activate `.15` until separate
-  Owner I/W authorization. After I/W/production promotion, refresh the ChatGPT
-  Engineering Bridge connector so its discovered `run_task` schema exposes the
-  three new optional fields, then run one bounded real task with explicit
-  routing and verify the returned provenance before resuming A/B/C/D role
-  dispatch.
+- Production is now `.15`; do not remove `.14` rollback capability.
+- The only remaining acceptance item is refreshing/reconnecting the ChatGPT
+  Engineering Bridge connector so its discovered schema exposes the three new
+  optional fields, followed by one bounded explicit-routing production smoke.
