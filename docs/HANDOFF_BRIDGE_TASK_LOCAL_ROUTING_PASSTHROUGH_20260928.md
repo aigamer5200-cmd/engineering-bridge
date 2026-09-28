@@ -11,11 +11,12 @@ defaults.
 
 - worktree: `D:\WORKTREE_ZONE\engineering-bridge-5090287d`
 - repository: Engineering Bridge
-- branch: detached `HEAD` (no branch name)
+- branch: `fix/bridge-task-routing-passthrough-20260928`
 - source checkpoint before this repair: `6c55f4e5094ce2be6672a9dd25b3df12dc368552`
+- implementation checkpoint: `f663b657507ea44a992c226a6e4041fce4916a21`
 - current package version: `1.4.2-biaogu.15`
-- changes are intentionally uncommitted; no commit, push, integration, deploy,
-  or production action was performed.
+- implementation is C/P'd on the feature branch; no integration, deploy, or
+  production action was performed.
 
 ## Implemented
 
@@ -70,10 +71,9 @@ defaults.
 - Do not modify legacy `CodexExecutor` routing, governance modules, account or
   profile selectors, auth material, global Codex configuration, deployment,
   integration, commit, or push as part of this repair.
-- A future authorized checkpoint may review and commit the current uncommitted
-  diff. Another session can resume from this handoff, the exact source
-  checkpoint, and the worktree state without relying on the prior native
-  session.
+- Another Web GPT/Codex account/session can continue from this handoff,
+  `f663b657507ea44a992c226a6e4041fce4916a21`, and repository state without
+  relying on the prior native Codex thread/session.
 - Production remains `1.4.2-biaogu.14`. Do not activate `.15` until separate
   Owner I/W authorization. After I/W/production promotion, refresh the ChatGPT
   Engineering Bridge connector so its discovered `run_task` schema exposes the
