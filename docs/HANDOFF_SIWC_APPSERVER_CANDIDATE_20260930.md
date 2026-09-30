@@ -47,6 +47,8 @@ previous native Codex thread/session.
   - candidate environment isolation with `OPENAI_API_KEY` / `CODEX_API_KEY`
     removed and short-lived `ACCESS_TOKEN` supplied only to the candidate.
 - Added explicit SIWC CLI/launcher commands under `ops/siwc/`.
+- Added `ops/siwc/siwc-live-smoke.mjs` for bounded candidate-only live E2E
+  without exposing token material.
 - Added candidate docs in `docs/SIWC_CANDIDATE.md`.
 - Kept the public MCP surface exactly four tools; `src/mcp-stdio.ts` is unchanged.
 - Added `clientInfo.title="Engineering Bridge"` to app-server initialize while
@@ -63,6 +65,29 @@ previous native Codex thread/session.
   - Responses endpoint/provider reachability is recognized;
   - WebSocket mode is disabled as intended.
 - Removed the temporary validation runtime after the doctor check.
+- Completed the first real browser `Continue with ChatGPT` login for explicit
+  profile A. The callback succeeded, the required direct-plan scope was
+  granted, and no credential payload was written to the repository.
+- Completed live candidate E2E through the isolated launcher:
+  - read-only inference returned `SIWC_OK`;
+  - write + local shell readback created the expected fixture content and
+    returned `SIWC_WRITE_OK`;
+  - explicit interrupt stopped a 60-second shell task in about 3 seconds and
+    surfaced the task as interrupted;
+  - forced OAuth refresh rotated the renewable session successfully, and a new
+    app-server process using the refreshed token completed another inference;
+  - an unconnected SIWC profile failed closed before MCP startup, with no
+    native/API-key fallback;
+  - the existing production/LKG Bridge remained independently healthy and
+    returned `LKG_OK` during the same validation phase.
+- First write-capable live test exposed one expected isolation difference: the
+  new candidate `CODEX_HOME` did not inherit the Owner's native non-interactive
+  approval/sandbox settings. This was repaired outside Bridge Core by placing
+  `approval_policy="never"` and the already Owner-approved
+  `sandbox_mode="danger-full-access"` in the candidate-only Codex config while
+  continuing to exclude `ACCESS_TOKEN` from shell subprocess environments.
+- Increased the loopback OAuth callback lifetime from 5 to 20 minutes after
+  the first browser attempt legitimately outlived the initial listener.
 
 ## Verification
 
@@ -74,6 +99,18 @@ npm test                                 PASS
 existing suite: 370 total / 365 pass / 5 skip / 0 fail
 SIWC suite:       9 total /   9 pass / 0 skip / 0 fail
 git diff --check                         PASS
+```
+
+Latest live checks after the offline regression prerequisites:
+
+```text
+SIWC browser OAuth profile A             PASS
+ChatGPT-plan read-only inference         PASS
+write + shell readback                   PASS
+native turn interrupt                    PASS
+OAuth refresh + post-refresh inference   PASS
+invalid-profile fail-closed              PASS
+production/LKG isolation smoke           PASS
 ```
 
 The existing skipped tests are pre-existing platform-specific skips; none are
@@ -96,18 +133,13 @@ silently rewrite them.
 
 ## Pending / Human Gate
 
-The next phase requires the Owner's browser interaction and therefore was not
-automated in this checkpoint:
+The first live OAuth and core execution E2E are complete. Remaining promotion
+gates are intentionally deferred:
 
-1. build the candidate;
-2. run `npm run siwc:login -- --profile A`;
-3. Owner completes `Continue with ChatGPT` consent in the browser;
-4. verify `siwc:status` without exposing credential material;
-5. start a separately configured candidate MCP entry;
-6. run one read-only inference through `openai_chatgpt_plan` with an explicitly
-   supported model and no optional service-tier override;
-7. only after that succeeds, exercise coding/shell/test/Git-diff, large output,
-   interrupt, refresh/restart, error paths, A/B profile isolation, and soak.
+1. optional profile-B browser authorization and explicit A/B isolation proof;
+2. longer soak across repeated bounded phases and ordinary development work;
+3. large live output / quota-exhaustion observations if they occur naturally;
+4. Owner decision to promote SIWC candidate to current after the soak window.
 
 No promotion to current is authorized by this checkpoint. Production/LKG must
 remain the rollback path until Owner acceptance after live E2E and soak.

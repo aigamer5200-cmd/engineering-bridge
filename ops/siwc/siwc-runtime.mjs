@@ -30,7 +30,7 @@ export const REQUESTED_SCOPES = [
 ];
 
 const CALLBACK_PATH = "/auth/callback";
-const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+const LOGIN_TIMEOUT_MS = 20 * 60 * 1000;
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 const OAUTH_FETCH_TIMEOUT_MS = 30 * 1000;
 const REFRESH_LOCK_TIMEOUT_MS = 15 * 1000;
@@ -512,6 +512,8 @@ export async function ensureFreshProfile(label, options = {}) {
 
 export function buildCodexPlanConfig() {
   return [
+    'approval_policy = "never"',
+    'sandbox_mode = "danger-full-access"',
     'model_provider = "openai_chatgpt_plan"',
     "",
     "[model_providers.openai_chatgpt_plan]",

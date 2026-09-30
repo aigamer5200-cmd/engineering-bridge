@@ -87,6 +87,8 @@ test("returning authorization omits agent_name_hint", () => {
 
 test("candidate Codex provider config contains no token material", () => {
   const config = buildCodexPlanConfig();
+  assert.match(config, /approval_policy = "never"/);
+  assert.match(config, /sandbox_mode = "danger-full-access"/);
   assert.match(config, /model_provider = "openai_chatgpt_plan"/);
   assert.match(config, /env_key = "ACCESS_TOKEN"/);
   assert.match(config, /wire_api = "responses"/);

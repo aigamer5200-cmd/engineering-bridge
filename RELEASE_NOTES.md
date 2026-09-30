@@ -18,8 +18,14 @@ around the existing thin Bridge. It does not replace or mutate the production
   remain unchanged;
 - app-server `initialize` now includes the human-readable client title required
   by the SIWC app-server contract in addition to the stable name and version;
-- live OAuth consent and ChatGPT-plan inference remain a separate Human Gate
-  before any promotion decision.
+- candidate `CODEX_HOME` carries the already Owner-approved non-interactive
+  `approval_policy="never"` + `sandbox_mode="danger-full-access"` execution
+  profile while keeping `ACCESS_TOKEN` excluded from shell subprocesses;
+- live profile-A OAuth, ChatGPT-plan read/write inference, local shell execution,
+  interrupt, token refresh, fail-closed invalid-profile behavior, and
+  production/LKG isolation have all been exercised successfully;
+- promotion remains deferred until a separate soak/Owner gate; current/LKG is
+  still unchanged and immediately available for rollback.
 
 ## v1.4.2-biaogu.15
 

@@ -51,6 +51,10 @@ The candidate follows the OpenAI Sign in with ChatGPT open-source/local flow:
 - app-server receives the short-lived token only through ACCESS_TOKEN;
 - app-server uses an isolated CODEX_HOME whose non-secret provider config is
   openai_chatgpt_plan, Responses API, and supports_websockets=false;
+- that isolated candidate CODEX_HOME also carries the already Owner-approved
+  non-interactive execution profile `approval_policy="never"` and
+  `sandbox_mode="danger-full-access"`; these are app-server runtime settings,
+  not new Bridge task policy or MCP tools;
 - the candidate CODEX_HOME explicitly excludes ACCESS_TOKEN from shell-tool
   subprocess environments even though app-server itself receives the token;
 - the app-server client identity is engineering-bridge / Engineering Bridge /
@@ -89,6 +93,10 @@ fallback:
 The first command opens the system browser and requires human OAuth consent.
 Later sign-ins reuse that profile's issued client ID. A returning sign-in that
 resolves to a different verified subject is rejected.
+
+The local loopback callback remains available for up to 20 minutes so normal
+account selection, MFA, or consent steps do not invalidate the callback while
+the Owner is still completing the browser flow.
 
 Non-secret status:
 

@@ -28,6 +28,7 @@
     "siwc:status": "node ops/siwc/siwc-cli.mjs status",
     "siwc:refresh": "node ops/siwc/siwc-cli.mjs refresh",
     "siwc:bridge": "node ops/siwc/start-bridge-siwc.mjs",
+    "siwc:smoke": "node ops/siwc/siwc-live-smoke.mjs",
     "mcp:stdio": "node dist/src/mcp-stdio.js",
     "prepack": "npm run build"
   },
