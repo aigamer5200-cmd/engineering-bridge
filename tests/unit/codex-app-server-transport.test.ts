@@ -104,7 +104,9 @@ test("omitted routing remains byte-for-byte minimal on the official app-server",
   assert.deepEqual(allMessages.find((message) => message.method === "initialize"), {
     id: 1,
     method: "initialize",
-    params: { clientInfo: { name: "engineering-bridge", version: VERSION } }
+    params: {
+      clientInfo: { name: "engineering-bridge", title: "Engineering Bridge", version: VERSION }
+    }
   });
   assert.deepEqual(allMessages.find((message) => message.method === "thread/start")?.params, { cwd: WORKSPACE });
   assert.deepEqual(allMessages.find((message) => message.method === "turn/start")?.params, {

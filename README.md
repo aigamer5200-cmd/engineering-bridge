@@ -4,6 +4,10 @@ Engineering Bridge 1.4.2-biaogu.15 是一個本機 MCP STDIO transport，直接�
 官方 Codex CLI app-server。Codex CLI 與本機設定負責模型選擇及原生執行行為；
 Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中的 task。
 
+> 2026-09-30：另有隔離的 **Sign in with ChatGPT plan usage candidate**，
+> 僅供 preview 驗證，沒有取代 production/LKG，也沒有自動 fallback。
+> 詳見 docs/SIWC_CANDIDATE.md。
+
 公開 MCP tool surface 嚴格只有四個：
 
 - `bind_project(project_path, confirmation="BIND")`

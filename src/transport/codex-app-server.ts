@@ -357,7 +357,9 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     child.on("close", finishFromExit);
 
     try {
-      await this.call("initialize", { clientInfo: { name: "engineering-bridge", version: VERSION } });
+      await this.call("initialize", {
+        clientInfo: { name: "engineering-bridge", title: "Engineering Bridge", version: VERSION }
+      });
       this.notify("initialized", {});
       const routingParams = {
         ...(request.model === undefined ? {} : { model: request.model }),

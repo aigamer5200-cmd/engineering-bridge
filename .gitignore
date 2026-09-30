@@ -10,3 +10,5 @@ var/
 *.tsbuildinfo
 .worktrees/
 .local/
+.siwc/
+siwc-runtime/

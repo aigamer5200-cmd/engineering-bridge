@@ -1,5 +1,26 @@
 # Release notes
 
+## Unreleased candidate — SIWC ChatGPT plan app-server path
+
+This candidate adds an isolated, opt-in Sign in with ChatGPT (SIWC) runtime
+around the existing thin Bridge. It does not replace or mutate the production
+/ LKG launch path and it adds no MCP tools or Bridge-owned routing policy.
+
+- OAuth Authorization Code + PKCE, OIDC validation, protected repo-external
+  profile storage, rotating refresh-token handling, and per-profile refresh
+  serialization live under `ops/siwc/`, outside Bridge Core;
+- the candidate launches the existing MCP entrypoint with a dedicated
+  repo-external `CODEX_HOME` configured for `openai_chatgpt_plan` and supplies
+  the short-lived OAuth credential only through `ACCESS_TOKEN`;
+- inherited `OPENAI_API_KEY` / `CODEX_API_KEY` are removed from the candidate
+  child environment and there is no automatic fallback to native/API-key auth;
+- existing `bind_project`, `run_task`, `task_result`, and `control_task` schemas
+  remain unchanged;
+- app-server `initialize` now includes the human-readable client title required
+  by the SIWC app-server contract in addition to the stable name and version;
+- live OAuth consent and ChatGPT-plan inference remain a separate Human Gate
+  before any promotion decision.
+
 ## v1.4.2-biaogu.15
 
 This release adds a minimal task-local routing passthrough to the active thin

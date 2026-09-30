@@ -23,7 +23,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
-    "test": "npm run build && node --test \"dist/tests/unit/**/*.test.js\"",
+    "test": "npm run build && node --test \"dist/tests/unit/**/*.test.js\" && node --test tests/siwc/siwc-runtime.test.mjs",
+    "siwc:login": "node ops/siwc/siwc-cli.mjs login",
+    "siwc:status": "node ops/siwc/siwc-cli.mjs status",
+    "siwc:refresh": "node ops/siwc/siwc-cli.mjs refresh",
+    "siwc:bridge": "node ops/siwc/start-bridge-siwc.mjs",
     "mcp:stdio": "node dist/src/mcp-stdio.js",
     "prepack": "npm run build"
   },
