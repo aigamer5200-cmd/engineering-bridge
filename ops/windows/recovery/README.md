@@ -6,10 +6,10 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 
 ## Runtime behavior
 
-### Engineering Bridge ingress: dedicated Secure MCP Green candidate
+### Engineering Bridge ingress: Secure MCP Green primary + Cloudflare Blue rollback
 
-Engineering Bridge has a separate candidate path for an OpenAI Secure MCP
-Tunnel that terminates directly into the existing local STDIO Bridge runner:
+Engineering Bridge production ingress now includes an OpenAI Secure MCP Tunnel
+Green lane that terminates directly into the existing local STDIO Bridge runner:
 
 ChatGPT -> Secure MCP Tunnel -> RUN_ENGINEERING_BRIDGE_STDIO.bat ->
 Engineering Bridge -> codex app-server --stdio.
@@ -19,7 +19,7 @@ and from the existing Cloudflare Bridge lane. It does not reuse the DevSpace
 tunnel ID/profile, does not alter the Codex app-server transport, and does not
 require the existing HTTP/OAuth gateway on port 8768 for Green traffic. The
 Cloudflare gateway/tunnel remains the Blue rollback and is required to stay
-healthy during Green startup/rollback validation.
+healthy in parallel with Green.
 
 Canonical Bridge Secure MCP controls:
 
@@ -48,6 +48,12 @@ SETUP_Secure_MCP_Bridge.bat <tunnel_id> materializes the local STDIO profile
 and prints the Connector resource URL. The ID must match the tunnel-client
 format `tunnel_` plus exactly 32 lowercase alphanumeric characters. Do not reuse
 the DevSpace Tunnel ID.
+
+The accepted production ChatGPT connector is `Engineering Bridge SecureTunnel`.
+Its tool catalog exposes the Bridge control surface and has been validated
+end-to-end through Codex. Green stop/start reconnects the existing connector;
+the connector does not need to be recreated. Explicit rollback stops only Green
+and leaves Blue available.
 
 ### DevSpace ingress: Secure MCP Green + Cloudflare Blue rollback
 
@@ -82,11 +88,13 @@ healthy startup look like an error even though readiness had passed.
 - Health requires the expected listener owners plus real local HTTP/readiness responses. Bridge public tunnel health is checked independently through the dedicated `20242` cloudflared metrics listener when public auth is enabled.
 - Three consecutive repairable failures are required before automatic recovery.
 - Unexpected processes owning a managed port are fail-closed: Recovery logs the condition and does not kill the process.
-- The legacy watchdog still repairs the Blue `7677` lane through the existing DS start/restart adapters; Green startup itself is owned by the Secure MCP controller. Bridge recovery reuses `RESTART_BRIDGE_CHANNEL.bat`.
-- The critical deployed BAT surface is tracked here as canonical recovery/startup source: `START_ALL_CHANNELS.bat`, `START_DS_CHANNEL.bat`, `STOP_DS_CHANNEL.bat`, `START_BRIDGE_CHANNEL.bat`, `CHECK_CHANNELS.bat`, and `START_RECOVERY_WATCHDOG.bat`.
+- The legacy watchdog still repairs the Blue `7677` lane through the existing DS start/restart adapters; Green startup itself is owned by the Secure MCP controller. Bridge unattended recovery intentionally keeps using the Blue-only `RESTART_BRIDGE_CHANNEL.bat`, so it never blocks waiting for a Runtime API key.
+- The critical deployed BAT surface is tracked here as canonical recovery/startup source: `START_ALL_CHANNELS.bat`, `STOP_ALL_CHANNELS.bat`, `RESTART_ALL_CHANNELS.bat`, `START_DS_CHANNEL.bat`, `STOP_DS_CHANNEL.bat`, `START_BRIDGE_CHANNEL.bat`, `START_Secure_MCP_Bridge.bat`, `STOP_Secure_MCP_Bridge.bat`, `STATUS_Secure_MCP_Bridge.bat`, `ROLLBACK_Secure_MCP_Bridge.bat`, `CHECK_CHANNELS.bat`, and `START_RECOVERY_WATCHDOG.bat`.
 - `START_DS_BLUE_CHANNEL.bat` owns the legacy Blue/Cloudflared checks. `START_DS_CHANNEL.bat` composes Blue readiness with idempotent Secure MCP Green startup and returns success only when both lanes are safe.
-- Once Bridge public auth is provisioned, `START_BRIDGE_CHANNEL.bat` fails closed if the dedicated tunnel runner/token is missing and requires both the local OAuth metadata endpoint and public OAuth metadata endpoint to be healthy before returning success.
-- `CHECK_CHANNELS.bat` validates Secure MCP Green, Blue rollback, Bridge local/public OAuth, Bridge tunnel ownership, and the separate Engineering Recovery Watchdog. This Recovery Watchdog remains a required health component.
+- `START_BRIDGE_CHANNEL.bat` remains the Blue-only Bridge launcher. Once Bridge public auth is provisioned, it fails closed if the dedicated Cloudflare runner/token is missing and requires both the local OAuth metadata endpoint and public OAuth metadata endpoint to be healthy before returning success.
+- `START_ALL_CHANNELS.bat` starts/adopts Bridge Blue first, then starts/adopts Bridge Secure MCP Green. If Green must launch, the Runtime API key is requested only through the local secure prompt. A Green startup failure leaves Blue untouched.
+- `STOP_ALL_CHANNELS.bat` stops Bridge Green before the legacy Bridge Blue lane. `RESTART_ALL_CHANNELS.bat` therefore performs a full interactive restart and may require local Runtime API key entry when Green comes back.
+- `CHECK_CHANNELS.bat` validates DevSpace Secure MCP, Bridge Secure MCP Green, Bridge Blue rollback, Bridge local/public OAuth, Bridge tunnel ownership, and the separate Engineering Recovery Watchdog. This Recovery Watchdog remains a required health component.
 - `START_RECOVERY_WATCHDOG.bat` verifies that the PID file resolves to the expected watchdog process instead of treating PID-file creation alone as readiness.
 - Recovery waits only for the immediate control BAT wrapper to return. It deliberately does **not** use PowerShell `Start-Process -Wait`, because that can wait for the long-running DevSpace `node.exe` descendant and deadlock the watchdog after a successful restart.
 - Successful automatic service recovery writes `runtime\recovery-handoff.txt` and `runtime\recovery-state.json`, then opens a fresh ChatGPT browser window and copies the handoff text to the clipboard.
