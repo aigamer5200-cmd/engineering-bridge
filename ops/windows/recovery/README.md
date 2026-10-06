@@ -6,16 +6,42 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 
 ## Runtime behavior
 
-- The watchdog checks DevSpace on port `7677` and Engineering Bridge on `8768` every 15 seconds.
-- DevSpace `7677` may be owned either by the legacy direct `@waishnav/devspace` CLI process or by the guarded-production `devspace_development_guard_proxy.mjs`. Both are expected production owners; any other listener still fails closed.
-- Health requires the expected listener owner plus a real local HTTP response. Bridge public tunnel health is also checked through the dedicated `20242` cloudflared metrics listener when public auth is enabled.
+### DevSpace ingress: Secure MCP Green + Cloudflare Blue rollback
+
+The canonical DevSpace ingress is now OpenAI Secure MCP Tunnel ->
+127.0.0.1:7688 GOAL Development Guard Proxy -> 127.0.0.1:7689 DevSpace
+v1.1.0-beta.4. The former Cloudflare -> 7677 Guard -> 7679 DevSpace v1.0.8
+path remains online as the last-known-good Blue rollback.
+
+`START_DS_CHANNEL.bat` is therefore a composite launcher. It first ensures the
+Blue rollback is healthy, then starts or adopts Secure MCP Green. Green lifecycle
+logic lives in `SecureMcpDevSpace.ps1`; the Owner-facing BAT wrappers are:
+
+- `START_Secure_MCP_DevSpace.bat`
+- `STOP_Secure_MCP_DevSpace.bat`
+- `STATUS_Secure_MCP_DevSpace.bat`
+- `ROLLBACK_Secure_MCP_DevSpace.bat`
+- `00_啟動_新版_Secure_MCP_DS.bat`
+
+Green stop/rollback never stops Blue. The OpenAI Runtime API key is process-memory
+only and is requested with secure input only when tunnel-client actually needs to
+start. It is not written to BAT, config, log, manifest, or Git.
+
+The status path reports tunnel `/readyz` as HTTP-200 READY without echoing the
+response body. A healthy tunnel-client may mention an expected unauthenticated MCP
+initialize rejection in that body; printing it in the Owner launcher made a
+healthy startup look like an error even though readiness had passed.
+
+- The legacy watchdog checks Blue DevSpace on port `7677` and Engineering Bridge on `8768` every 15 seconds. It is not the Secure MCP Green health authority.
+- Blue port `7677` may be owned either by the legacy direct `@waishnav/devspace` CLI process or by the guarded `devspace_development_guard_proxy.mjs`; any other Blue listener still fails closed. Green has its own strict 7688/7689/tunnel-client owner checks.
+- Health requires the expected listener owners plus real local HTTP/readiness responses. Bridge public tunnel health is checked independently through the dedicated `20242` cloudflared metrics listener when public auth is enabled.
 - Three consecutive repairable failures are required before automatic recovery.
 - Unexpected processes owning a managed port are fail-closed: Recovery logs the condition and does not kill the process.
-- Missing DevSpace listeners reuse `START_DS_CHANNEL.bat`; an HTTP-unresponsive DevSpace uses `RESTART_DS_CHANNEL.bat`. Bridge recovery reuses `RESTART_BRIDGE_CHANNEL.bat`.
+- The legacy watchdog still repairs the Blue `7677` lane through the existing DS start/restart adapters; Green startup itself is owned by the Secure MCP controller. Bridge recovery reuses `RESTART_BRIDGE_CHANNEL.bat`.
 - The critical deployed BAT surface is tracked here as canonical recovery/startup source: `START_ALL_CHANNELS.bat`, `START_DS_CHANNEL.bat`, `STOP_DS_CHANNEL.bat`, `START_BRIDGE_CHANNEL.bat`, `CHECK_CHANNELS.bat`, and `START_RECOVERY_WATCHDOG.bat`.
-- `START_DS_CHANNEL.bat` accepts both valid DevSpace owner models, requires a real local HTTP response, and verifies the DevSpace Cloudflared Windows service before returning success.
+- `START_DS_BLUE_CHANNEL.bat` owns the legacy Blue/Cloudflared checks. `START_DS_CHANNEL.bat` composes Blue readiness with idempotent Secure MCP Green startup and returns success only when both lanes are safe.
 - Once Bridge public auth is provisioned, `START_BRIDGE_CHANNEL.bat` fails closed if the dedicated tunnel runner/token is missing and requires both the local OAuth metadata endpoint and public OAuth metadata endpoint to be healthy before returning success.
-- `CHECK_CHANNELS.bat` is no longer a port-presence-only display. It validates expected listener ownership, local HTTP/OAuth health, public Bridge OAuth health, Cloudflared service state, tunnel metrics ownership, and the Recovery Watchdog process, and returns nonzero on a failed required component.
+- `CHECK_CHANNELS.bat` validates Secure MCP Green, Blue rollback, Bridge local/public OAuth, Bridge tunnel ownership, and the separate Engineering Recovery Watchdog. This Recovery Watchdog remains a required health component.
 - `START_RECOVERY_WATCHDOG.bat` verifies that the PID file resolves to the expected watchdog process instead of treating PID-file creation alone as readiness.
 - Recovery waits only for the immediate control BAT wrapper to return. It deliberately does **not** use PowerShell `Start-Process -Wait`, because that can wait for the long-running DevSpace `node.exe` descendant and deadlock the watchdog after a successful restart.
 - Successful automatic service recovery writes `runtime\recovery-handoff.txt` and `runtime\recovery-state.json`, then opens a fresh ChatGPT browser window and copies the handoff text to the clipboard.
@@ -43,7 +69,12 @@ If a surviving tool channel can still execute local commands, it may invoke the 
 
 ## Production integration
 
-The deployed master launcher starts the watchdog after DS and Bridge are started. The master stop path stops the watchdog before intentionally stopping either service, preventing an intentional shutdown from being mistaken for a failure.
+The deployed master launcher still starts/verifies the **Engineering Recovery
+Watchdog** after DS and Bridge become ready. Do not confuse it with the separate
+legacy **development-guard watchdog** referenced by the DevSpace production
+runtime manifest. A stale development-guard watchdog is a separate bounded
+maintenance concern: preflight stale development-guard records before restoring
+it so historical notification state cannot be replayed accidentally.
 
 Individual DS/Bridge stop paths also create maintenance suppression flags. Start paths remove those flags. This lets a user intentionally stop one channel while leaving the watchdog running for the other channel without the stopped service being automatically resurrected.
 
