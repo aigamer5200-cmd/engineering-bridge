@@ -6,6 +6,47 @@ The recovery layer deliberately lives outside the Engineering Bridge MCP process
 
 ## Runtime behavior
 
+### Engineering Bridge ingress: dedicated Secure MCP Green candidate
+
+Engineering Bridge has a separate candidate path for an OpenAI Secure MCP
+Tunnel that terminates directly into the existing local STDIO Bridge runner:
+
+ChatGPT -> Secure MCP Tunnel -> RUN_ENGINEERING_BRIDGE_STDIO.bat ->
+Engineering Bridge -> codex app-server --stdio.
+
+This path is deliberately independent from the DevSpace Secure Tunnel profile
+and from the existing Cloudflare Bridge lane. It does not reuse the DevSpace
+tunnel ID/profile, does not alter the Codex app-server transport, and does not
+require the existing HTTP/OAuth gateway on port 8768 for Green traffic. The
+Cloudflare gateway/tunnel remains the Blue rollback and is required to stay
+healthy during Green startup/rollback validation.
+
+Canonical Bridge Secure MCP controls:
+
+- SetupSecureMcpBridge.ps1
+- SecureMcpBridge.ps1
+- SETUP_Secure_MCP_Bridge.bat
+- START_Secure_MCP_Bridge.bat
+- STOP_Secure_MCP_Bridge.bat
+- STATUS_Secure_MCP_Bridge.bat
+- ROLLBACK_Secure_MCP_Bridge.bat
+
+The dedicated runtime root is D:\Engineering_Bridge_System\BridgeSecureTunnel,
+the profile name is engineering-bridge, and the fixed local tunnel health port
+is 18081. Setup copies the already-validated tunnel-client v0.0.15 binary into
+the Bridge-owned runtime root so future DevSpace tunnel upgrades cannot
+silently change the Bridge transport.
+
+The OpenAI Runtime API key remains process-memory only: the profile stores only
+env:CONTROL_PLANE_API_KEY, and Start prompts securely only when the tunnel
+process actually needs to launch.
+
+The one account-scoped prerequisite is a dedicated remote Tunnel ID created in
+OpenAI Tunnels management (or by tunnel-client admin tunnels create with a
+separate admin key). Once that ID exists,
+SETUP_Secure_MCP_Bridge.bat <tunnel_id> materializes the local STDIO profile
+and prints the Connector resource URL. Do not reuse the DevSpace Tunnel ID.
+
 ### DevSpace ingress: Secure MCP Green + Cloudflare Blue rollback
 
 The canonical DevSpace ingress is now OpenAI Secure MCP Tunnel ->
