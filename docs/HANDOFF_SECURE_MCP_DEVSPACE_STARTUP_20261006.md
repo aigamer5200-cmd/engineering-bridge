@@ -112,7 +112,11 @@ are not current startup failures and are not emitted by the new launcher.
 ## Do not touch / pending
 
 - Do not delete or disable Blue 7677/7679 or Cloudflare rollback.
-- Do not rebuild/rename the current `DevSpace_SecureTunnel_Canary` Connector.
+- Current Owner-facing ChatGPT Connector is `DevSpace_SecureTunnel`, bound to
+  the already-validated Secure MCP Tunnel backend. The former
+  `DevSpace_SecureTunnel_Canary` Connector is temporarily retained only as a
+  ChatGPT-side fallback and may be removed later after normal-use confidence;
+  removing that duplicate Connector must not delete/rebuild the Tunnel itself.
 - Do not put `CONTROL_PLANE_API_KEY` values in BAT/config/log/Git.
 - Do not live-test STOP/ROLLBACK merely for ceremony while Green is healthy.
 - Do not restart the legacy development-guard watchdog recorded in the DevSpace
