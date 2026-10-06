@@ -76,7 +76,8 @@ $manifest = [ordered]@{
     mcp_command = $mcpCommand
     bridge_runner = $BridgeRunner
     tunnel_client = $client
-    runtime_api_key_persistence = "none"
+    runtime_api_key_persistence = "Windows DPAPI CurrentUser encrypted-at-rest"
+    runtime_api_key_usage = "Decrypted only into transient process environment/memory; profile env-only"
     blue_rollback = "Cloudflare Engineering Bridge lane remains unchanged"
 }
 $json = ($manifest | ConvertTo-Json -Depth 20) + [Environment]::NewLine
@@ -89,6 +90,6 @@ Write-Host "Tunnel resource            : $resourceUrl"
 Write-Host "MCP transport              : local STDIO"
 Write-Host "Bridge command             : $mcpCommand"
 Write-Host "Health port                : $TunnelHealthPort"
-Write-Host "Runtime API key            : env/process memory only"
+Write-Host "Runtime API key            : DPAPI CurrentUser encrypted-at-rest; transient process env/memory"
 Write-Host "Blue Cloudflare Bridge     : UNCHANGED"
 Write-Host "SECURE_MCP_BRIDGE_SETUP_PASS"

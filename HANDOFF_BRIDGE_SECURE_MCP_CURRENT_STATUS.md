@@ -102,3 +102,21 @@ last-known-good recovery path.
 
 The separate upstream Engineering Bridge v1.5.0 audit/upgrade is not part of this
 integration and must be handled as a new bounded phase after this state is closed.
+
+## 2026-10-07 source-only DPAPI candidate (not production acceptance)
+
+Branch: `feature/secure-mcp-dpapi-runtime-key-20261007`; base checkpoint:
+`910c27c5c3d6b1048e71b9e5a54c3599cf011ad6`. Changes are uncommitted/unpushed.
+The earlier acceptance and prompt/process-memory descriptions above are
+historical production evidence, not acceptance of this new source candidate.
+The requested runtime baseline is `1.4.2-biaogu.16`; no runtime/version or
+routing/GOAL changes are made by this candidate.
+
+Both source Green controllers now use process env -> shared DPAPI CurrentUser
+store -> bounded setup failure, with no recurring Start prompt. Profiles remain
+`env:CONTROL_PLANE_API_KEY`; no plaintext persistence is allowed. Unattended
+recovery remains Blue-only. Production/deployed files and the actual secret
+store remain untouched. Owner I/W and live lifecycle validation are pending.
+See `docs/HANDOFF_SECURE_MCP_DPAPI_RUNTIME_KEY_20261007.md` for changed files,
+tests and exact deployment/resume steps. A fresh account-bound session can
+resume from that durable HANDOFF and branch without the prior native thread.

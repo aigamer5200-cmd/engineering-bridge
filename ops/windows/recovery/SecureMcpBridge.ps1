@@ -201,22 +201,17 @@ function Start-Green {
         $version = (& $client --version 2>&1 | Out-String).Trim()
         if ($version -notmatch "0\.0\.15") { throw "Unexpected tunnel-client version: $version" }
 
-        $runtimeKey = $null
-        if (-not [string]::IsNullOrWhiteSpace($env:CONTROL_PLANE_API_KEY)) {
-            $runtimeKey = $env:CONTROL_PLANE_API_KEY
-        } else {
-            Write-Host "Runtime API key required to start OpenAI Secure MCP Tunnel."
-            $secure = Read-Host "Paste Runtime API Key" -AsSecureString
-            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-            try { $runtimeKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
-            finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $keyHelper = "D:\Engineering_Bridge_System\control\SecureMcpRuntimeKey.ps1"
+        if (-not (Test-Path -LiteralPath $keyHelper -PathType Leaf)) {
+            throw "Runtime key helper missing. Deploy SecureMcpRuntimeKey.ps1 and run SET_Secure_MCP_Runtime_API_Key.bat once."
         }
-        if ([string]::IsNullOrWhiteSpace($runtimeKey)) { throw "Runtime API key was empty." }
+        . $keyHelper
+        $runtimeKey = Resolve-SecureMcpRuntimeKey
 
         $oldKey = $env:CONTROL_PLANE_API_KEY
         try {
             $env:CONTROL_PLANE_API_KEY = $runtimeKey
-            & $client doctor --profile $Profile --explain
+            & $client doctor --profile $Profile --explain *> $null
             if ($LASTEXITCODE -ne 0) {
                 throw "tunnel-client doctor failed with exit code $LASTEXITCODE."
             }

@@ -131,6 +131,9 @@ function Assert-Config {
     if ([string]$config.server.publicBaseUrl -ne "http://127.0.0.1:$GreenProxyPort") { throw "config publicBaseUrl is not Green proxy $GreenProxyPort." }
     if (@($config.oauth.allowedResourceUrls) -notcontains $TunnelResourceUrl) { throw "Tunnel resource URL is missing from oauth.allowedResourceUrls." }
     $profileRaw = Get-Content -LiteralPath $tunnelProfile -Raw
+    if ($profileRaw -notmatch [regex]::Escape('api_key: "env:CONTROL_PLANE_API_KEY"')) {
+        throw "Tunnel profile does not use environment-only runtime API key."
+    }
     if ($profileRaw -notmatch [regex]::Escape($TunnelId)) { throw "Tunnel profile does not contain expected Tunnel ID." }
     if ($profileRaw -notmatch [regex]::Escape("http://127.0.0.1:$GreenProxyPort/mcp")) { throw "Tunnel profile does not target Green proxy $GreenProxyPort." }
 }
@@ -248,17 +251,12 @@ function Start-Green {
     if (-not $green.TunnelOk) {
         $version = (& $tunnelClient --version 2>&1 | Out-String).Trim()
         if ($version -notmatch "0\.0\.15") { throw "Unexpected tunnel-client version: $version" }
-        $runtimeKey = $null
-        if (-not [string]::IsNullOrWhiteSpace($env:CONTROL_PLANE_API_KEY)) {
-            $runtimeKey = $env:CONTROL_PLANE_API_KEY
-        } else {
-            Write-Host "Runtime API key required to start OpenAI Secure MCP Tunnel."
-            $secure = Read-Host "Paste Runtime API Key" -AsSecureString
-            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-            try { $runtimeKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
-            finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $keyHelper = "D:\Engineering_Bridge_System\control\SecureMcpRuntimeKey.ps1"
+        if (-not (Test-Path -LiteralPath $keyHelper -PathType Leaf)) {
+            throw "Runtime key helper missing. Deploy SecureMcpRuntimeKey.ps1 and run SET_Secure_MCP_Runtime_API_Key.bat once."
         }
-        if ([string]::IsNullOrWhiteSpace($runtimeKey)) { throw "Runtime API key was empty." }
+        . $keyHelper
+        $runtimeKey = Resolve-SecureMcpRuntimeKey
 
         $stdout = Join-Path $logsRoot "green-production-tunnel.stdout.log"
         $stderr = Join-Path $logsRoot "green-production-tunnel.stderr.log"
