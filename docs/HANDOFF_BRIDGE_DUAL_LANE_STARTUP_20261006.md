@@ -108,3 +108,30 @@ do not resume another account's thread. The next task is the candidate checkpoin
 followed by the Owner I/W Human Gate for main integration, deployed control/root
 BAT updates, and live idempotent lifecycle validation above. This executor is an internal
 child; notification ownership remains with the outer supervisor.
+
+## Owner I/W + deployed control integration result — 2026-10-07
+
+- Owner explicitly authorized `I/W`.
+- `main` fast-forwarded from `978f3c26fbcf42e09adfe4737db290018353b30b` to candidate checkpoint `e8457ded400416ecfa4e5febe7493a9f3d8e50ec`; no merge rewrite or conflict.
+- Post-integration build PASS and focused dual-lane startup suite 5/5 PASS on `main`.
+- Deployed canonical control files from `ops/windows/recovery` to `D:/Engineering_Bridge_System/control`:
+  - `START_ALL_CHANNELS.bat`
+  - `START_ENGINEERING_BRIDGE_ALL.bat`
+  - `STOP_ENGINEERING_BRIDGE_ALL.bat`
+  - `RESTART_ENGINEERING_BRIDGE_ALL.bat`
+- Deployed-file SHA256 readback matched the canonical repo copies for all four files.
+- Root Owner-facing Engineering Bridge stop/restart BAT wrappers were updated to delegate to `STOP_ENGINEERING_BRIDGE_ALL.bat` / `RESTART_ENGINEERING_BRIDGE_ALL.bat`. Their original copies are backed up under `D:/Engineering_Bridge_System/runtime/painless-upgrade/control-backups/bridge-dual-lane-startup-20261007`.
+- Deployment readback caught an initial wrapper-generation issue where CMD expanded `0` to `0`; the wrappers were repaired before acceptance so they now preserve `exit /b 0` exactly. This did not affect the running Bridge runtime.
+- Unattended `control/RESTART_BRIDGE_CHANNEL.bat` remains unchanged and Blue-only by design, so Engineering Recovery never depends on a Secure MCP Runtime API-key prompt.
+- Live idempotent `START_ENGINEERING_BRIDGE_ALL.bat` PASS: dynamic current runtime printed `1.4.2-biaogu.16`; Green primary READY; Blue rollback READY.
+- `STATUS_Secure_MCP_Bridge.bat` PASS: Green health `18081` HTTP 200 and Blue READY.
+- `CHECK_CHANNELS.bat` PASS: DevSpace Green/Blue, Bridge Green/Blue, Bridge public OAuth/tunnel metrics, and Engineering Recovery all READY.
+- Live Secure MCP Bridge -> Codex smoke PASS with exact `gpt-5.6-luna` / `max` / `priority` routing and marker `BRIDGE_DUAL_LANE_STARTUP_IW_OK`; sandbox Git state remained clean.
+- Production Bridge binary/runtime remains `1.4.2-biaogu.16`; this I/W changed startup/control integration only.
+- No Secure MCP profile, Tunnel ID, Cloudflare routing, OAuth credential, Runtime API key storage, or production Bridge binary was changed.
+
+### Final operational rule
+
+Owner-facing manual Bridge operation now treats Secure MCP Green primary + Cloudflare Blue rollback as one dual-lane Bridge unit. The master `START_ALL_CHANNELS.bat` delegates Bridge startup to the dual-lane helper. Unattended Engineering Recovery intentionally continues to use the legacy Blue-only `RESTART_BRIDGE_CHANNEL.bat`.
+
+A fresh account/session can continue from this HANDOFF plus current `main` without relying on the prior thread.
