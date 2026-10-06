@@ -31,6 +31,27 @@ Canonical Bridge Secure MCP controls:
 - STATUS_Secure_MCP_Bridge.bat
 - ROLLBACK_Secure_MCP_Bridge.bat
 
+Canonical interactive Engineering Bridge dual-lane helpers:
+
+- `START_ENGINEERING_BRIDGE_ALL.bat`
+- `STOP_ENGINEERING_BRIDGE_ALL.bat`
+- `RESTART_ENGINEERING_BRIDGE_ALL.bat`
+
+Interactive Owner-facing Bridge controls use these dual-lane helpers to manage
+Green primary and Blue rollback as one unit. After Owner I/W, deploy the helpers
+to the control directory and point the root Owner-facing Bridge stop/restart BATs
+to them. START reads `D:\Engineering_Bridge_System\runtime\bridge-current-version.txt`
+at invocation, starts Blue before Green, and verifies Green status before READY.
+Green startup/status failure leaves Blue untouched. STOP stops Green first and
+aborts before stopping Blue if Green stop fails. RESTART stops both lanes, waits
+two seconds, then starts them; Green startup may require secure Runtime API key
+input.
+
+`RESTART_BRIDGE_CHANNEL.bat` remains Blue-only for unattended recovery and must
+not be repointed to the interactive dual-lane restart. `START_BRIDGE_CHANNEL.bat`
+also remains Blue-only. The watchdog must never acquire a Runtime API key prompt
+through these adapters. These source changes do not deploy or change production.
+
 The dedicated runtime root is D:\Engineering_Bridge_System\BridgeSecureTunnel,
 the profile name is engineering-bridge, and the fixed local tunnel health port
 is 18081. Setup copies the already-validated tunnel-client v0.0.15 binary into
@@ -92,7 +113,7 @@ healthy startup look like an error even though readiness had passed.
 - The critical deployed BAT surface is tracked here as canonical recovery/startup source: `START_ALL_CHANNELS.bat`, `STOP_ALL_CHANNELS.bat`, `RESTART_ALL_CHANNELS.bat`, `START_DS_CHANNEL.bat`, `STOP_DS_CHANNEL.bat`, `START_BRIDGE_CHANNEL.bat`, `START_Secure_MCP_Bridge.bat`, `STOP_Secure_MCP_Bridge.bat`, `STATUS_Secure_MCP_Bridge.bat`, `ROLLBACK_Secure_MCP_Bridge.bat`, `CHECK_CHANNELS.bat`, and `START_RECOVERY_WATCHDOG.bat`.
 - `START_DS_BLUE_CHANNEL.bat` owns the legacy Blue/Cloudflared checks. `START_DS_CHANNEL.bat` composes Blue readiness with idempotent Secure MCP Green startup and returns success only when both lanes are safe.
 - `START_BRIDGE_CHANNEL.bat` remains the Blue-only Bridge launcher. Once Bridge public auth is provisioned, it fails closed if the dedicated Cloudflare runner/token is missing and requires both the local OAuth metadata endpoint and public OAuth metadata endpoint to be healthy before returning success.
-- `START_ALL_CHANNELS.bat` starts/adopts Bridge Blue first, then starts/adopts Bridge Secure MCP Green. If Green must launch, the Runtime API key is requested only through the local secure prompt. A Green startup failure leaves Blue untouched.
+- `START_ALL_CHANNELS.bat` delegates Bridge startup to `START_ENGINEERING_BRIDGE_ALL.bat`, which starts/adopts Blue first, then starts/adopts Secure MCP Green and verifies Green status. If Green must launch, the Runtime API key is requested only through the local secure prompt. A Green startup failure leaves Blue untouched.
 - `STOP_ALL_CHANNELS.bat` stops Bridge Green before the legacy Bridge Blue lane. `RESTART_ALL_CHANNELS.bat` therefore performs a full interactive restart and may require local Runtime API key entry when Green comes back.
 - `CHECK_CHANNELS.bat` validates DevSpace Secure MCP, Bridge Secure MCP Green, Bridge Blue rollback, Bridge local/public OAuth, Bridge tunnel ownership, and the separate Engineering Recovery Watchdog. This Recovery Watchdog remains a required health component.
 - `START_RECOVERY_WATCHDOG.bat` verifies that the PID file resolves to the expected watchdog process instead of treating PID-file creation alone as readiness.

@@ -12,17 +12,10 @@ if errorlevel 1 (
   exit /b 70
 )
 
-call "%CONTROL%\START_BRIDGE_CHANNEL.bat"
+call "%CONTROL%\START_ENGINEERING_BRIDGE_ALL.bat"
 if errorlevel 1 (
-  echo [FAIL] Engineering Bridge Blue rollback failed to start.
-  exit /b 72
-)
-
-call "%CONTROL%\START_Secure_MCP_Bridge.bat"
-if errorlevel 1 (
-  echo [FAIL] Engineering Bridge Secure MCP Green failed to start.
-  echo Blue rollback remains the last-known-good lane.
-  exit /b 75
+  echo [FAIL] Engineering Bridge dual-lane startup failed.
+  exit /b %ERRORLEVEL%
 )
 
 call "%CONTROL%\START_RECOVERY_WATCHDOG.bat"
