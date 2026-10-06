@@ -47,6 +47,18 @@ function Test-Readyz {
     }
 }
 
+function Test-HttpResponding([string]$Url) {
+    try {
+        Invoke-WebRequest -Uri $Url -Method GET -TimeoutSec 3 -MaximumRedirection 0 -UseBasicParsing -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        # Any HTTP response (including expected 4xx auth/protocol responses)
+        # proves the local gateway answered. Only transport/no-response fails.
+        if ($null -ne $_.Exception.Response) { return $true }
+        return $false
+    }
+}
+
 function Wait-Tunnel([int]$Seconds = 45) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -109,12 +121,25 @@ function Ensure-Blue {
         throw "Blue Engineering Bridge lane failed to reach READY state (exit $LASTEXITCODE)."
     }
     $gateway = Get-Listener $BlueGatewayPort
-    if (
-        $null -eq $gateway -or
-        $gateway.Name -ne "mcp-stdio.exe" -or
-        $gateway.CommandLine -notmatch "serve.*--port\s+$BlueGatewayPort"
-    ) {
-        throw "Blue Bridge gateway is not owned by the expected mcp-stdio process."
+    $gatewayCommand = if ($null -eq $gateway) { "" } else { [string]$gateway.CommandLine }
+    $gatewayOwned = (
+        $null -ne $gateway -and
+        (
+            (
+                $gateway.Name -eq "python.exe" -and
+                $gatewayCommand -match "mcp-stdio\.exe.*serve.*--port\s+$BlueGatewayPort"
+            ) -or
+            (
+                $gateway.Name -eq "mcp-stdio.exe" -and
+                $gatewayCommand -match "serve.*--port\s+$BlueGatewayPort"
+            )
+        )
+    )
+    if (-not $gatewayOwned) {
+        throw "Blue Bridge gateway is not owned by the expected mcp-stdio runtime."
+    }
+    if (-not (Test-HttpResponding "http://127.0.0.1:$BlueGatewayPort/mcp")) {
+        throw "Blue Bridge gateway listener exists but HTTP is unresponsive."
     }
 
     $authReady = "D:\Engineering_Bridge_System\runtime\PUBLIC_AUTH_READY.flag"

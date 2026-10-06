@@ -1,7 +1,7 @@
 # HANDOFF — Engineering Bridge Dedicated Secure MCP Tunnel
 
 Date: 2026-10-06
-Status: candidate reconciled to current main and verified through the account boundary; dedicated Bridge Tunnel ID is still required before Green setup/activation
+Status: dedicated Bridge Tunnel ID supplied and formal local profile materialized; Blue validation repaired; Green startup now waits only for local Runtime API Key input
 
 ## Repo / branch / WT
 
@@ -104,6 +104,26 @@ characters after `tunnel_`. The candidate now enforces
 `^tunnel_[a-z0-9]{32}$` before invoking tunnel-client, and README documents the
 same boundary.
 
+After the Owner supplied the dedicated Bridge Tunnel ID, formal setup created:
+
+```text
+profile = %APPDATA%\tunnel-client\engineering-bridge.yaml
+runtime root = D:\Engineering_Bridge_System\BridgeSecureTunnel
+health port = 18081
+transport = local STDIO
+Bridge runner = D:\Engineering_Bridge_System\runtime\RUN_ENGINEERING_BRIDGE_STDIO.bat
+```
+
+The first formal STATUS run exposed a second candidate-only validation defect:
+`Ensure-Blue` incorrectly required the 8768 listener process name to be
+`mcp-stdio.exe`. Current production intentionally launches the Python entry
+point, so the real owner is `python.exe` with a command line containing
+`.venv\Scripts\mcp-stdio.exe serve --port 8768`. The candidate was aligned to
+the canonical Engineering Recovery Watchdog logic, now accepts that production
+owner shape (while retaining direct `mcp-stdio.exe` compatibility), and also
+requires an actual HTTP response from `http://127.0.0.1:8768/mcp`. Re-validation
+reports Blue READY while Green remains stopped, as expected.
+
 ## Blue rollback live verification
 
 Blue was not stopped or reconfigured.
@@ -126,35 +146,35 @@ Bridge Green is still NOT activated.
 
 At this checkpoint:
 
-- `D:\Engineering_Bridge_System\BridgeSecureTunnel` does not exist.
-- Real `%APPDATA%\tunnel-client\engineering-bridge.yaml` does not exist.
-- No dedicated Bridge Tunnel ID has been supplied.
+- `D:\Engineering_Bridge_System\BridgeSecureTunnel` exists as the candidate
+  runtime root created by formal setup.
+- Real `%APPDATA%\tunnel-client\engineering-bridge.yaml` exists and points to
+  the dedicated Bridge Tunnel ID.
+- Dedicated Bridge Tunnel ID =
+  `tunnel_6ac4db29ebec8191bfd84fe7069d4d5a`.
 - No Runtime API key was requested or persisted.
 - Existing Bridge Cloudflare / :8768 Blue remains the active rollback lane.
 - Existing Bridge -> Codex executor remains unchanged.
 - Master launcher remains unchanged.
+- Green tunnel process is not running yet.
 
-## Account boundary / Human Gate
+## Runtime-key Human Gate
 
-The only missing account-scoped prerequisite for the next Green step is a
-dedicated OpenAI Tunnel ID for Engineering Bridge:
+The dedicated Bridge Tunnel ID is complete. The only remaining startup
+credential is a Runtime API Key with access to the same OpenAI organization.
+Do not ask the Owner to paste that key into chat. `START_Secure_MCP_Bridge.bat`
+must collect it locally through the secure prompt, after which the key exists
+only in the tunnel-client process environment/memory and is not written to Git,
+BAT, YAML, manifest, or log.
 
-```text
-tunnel_<32 lowercase alphanumeric characters>
-```
-
-Do not reuse the DevSpace Tunnel ID. The Owner may provide only the Tunnel ID.
-Do not ask the Owner to paste a Runtime API key into chat; when startup requires
-that key, collect it locally through the secure prompt so it remains process
-memory only.
-
-## Next action after Owner supplies the Bridge Tunnel ID
+## Next action after Owner has a Runtime API Key available locally
 
 1. Refresh/fetch and verify branch HEAD still matches the C/P checkpoint.
 2. Sync the committed candidate controls to the candidate control location
    without switching the master launcher.
-3. Run dedicated Bridge profile setup with the supplied Tunnel ID.
-4. Run tunnel-client doctor/readiness.
+3. Start the dedicated Bridge Green launcher and enter the Runtime API Key only
+   in the local secure prompt.
+4. Let startup run tunnel-client doctor/readiness.
 5. Start Green while keeping Blue online.
 6. Create/scan the ChatGPT Connector for the dedicated Bridge Tunnel.
 7. Verify tool catalog.
