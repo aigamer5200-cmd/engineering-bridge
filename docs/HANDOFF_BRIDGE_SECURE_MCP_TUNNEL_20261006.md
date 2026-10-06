@@ -1,7 +1,7 @@
 # HANDOFF — Engineering Bridge Dedicated Secure MCP Tunnel
 
 Date: 2026-10-06
-Status: dedicated Bridge Secure MCP Green runtime started successfully and independently verified; next boundary is ChatGPT custom MCP connector creation/tool scan and Green E2E
+Status: dedicated Bridge Secure MCP Green connector and end-to-end Codex path verified successfully; next boundary is deliberate stop/start/reconnect + rollback validation before production I/W
 
 ## Repo / branch / WT
 
@@ -153,7 +153,9 @@ Blue was not stopped or reconfigured.
 
 ## Current production truth
 
-Bridge Green is still NOT activated.
+Bridge Green is running as a development candidate and is now reachable from
+ChatGPT through the dedicated custom Tunnel connector. It is not yet integrated
+into the production/master launcher and main remains unchanged.
 
 At this checkpoint:
 
@@ -163,11 +165,12 @@ At this checkpoint:
   the dedicated Bridge Tunnel ID.
 - Dedicated Bridge Tunnel ID =
   `tunnel_6ac4db29ebec8191bfd84fe7069d4d5a`.
-- No Runtime API key was requested or persisted.
-- Existing Bridge Cloudflare / :8768 Blue remains the active rollback lane.
+- Runtime API key was entered locally only and was not persisted.
+- Existing Bridge Cloudflare / :8768 Blue remains online as the active rollback
+  lane in parallel with Green.
 - Existing Bridge -> Codex executor remains unchanged.
 - Master launcher remains unchanged.
-- Green tunnel process is not running yet.
+- Green tunnel process is running and healthy on 18081.
 
 ## Runtime-key Human Gate
 
@@ -199,25 +202,77 @@ Tunnel readyz : READY (HTTP 200)
 SECURE_MCP_BRIDGE_START_PASS
 ```
 
-## Next action: ChatGPT connector + Green E2E
+## ChatGPT Connector + Green E2E verification
+
+The Owner linked the dedicated Tunnel to the only available ChatGPT workspace,
+saved it, and then created the custom MCP connector:
+
+```text
+connector name = Engineering Bridge SecureTunnel
+connection = Tunnel
+authentication = no authentication
+tunnel id = tunnel_6ac4db29ebec8191bfd84fe7069d4d5a
+```
+
+ChatGPT reported the connector as connected. The live tool catalog exposed the
+expected four Bridge tools:
+
+- `bind_project`
+- `run_task`
+- `task_result`
+- `control_task`
+
+Real Green E2E was then executed through the new
+`Engineering_Bridge_SecureTunnel` connector against the allowed WT under
+`D:\WORKTREE_ZONE`:
+
+```text
+bind_project -> workspace_id aa46d2a3-40b1-441a-a11d-b997024c553a
+run_task -> task_id ae2533f4-6ec0-4bfd-b3c1-358f94f982c7
+task_result -> completed
+Codex thread_id = 01a11122-2b0f-7d71-a59d-7faa77d87100
+output = BRIDGE_SECURE_MCP_OK
+```
+
+This proves the complete Green chain is live:
+
+```text
+ChatGPT Web
+-> Engineering Bridge SecureTunnel connector
+-> OpenAI Secure MCP Tunnel
+-> local STDIO Engineering Bridge
+-> official Codex app-server --stdio
+-> Codex
+-> task_result back to ChatGPT
+```
+
+Immediately after the Green E2E, independent local verification still reported:
+
+```text
+Blue Bridge rollback = READY
+Green tunnel health 18081 = READY PID 27368
+Green readyz = HTTP 200
+STATUS_Secure_MCP_Bridge.bat = exit 0
+Blue Cloudflare metrics 20242 = HTTP 200
+```
+
+## Next action: deliberate lifecycle / rollback validation
 
 1. Refresh/fetch and verify branch HEAD still matches the C/P checkpoint.
-2. Sync the committed candidate controls to the candidate control location
-   without switching the master launcher.
-3. Keep Green and Blue running.
-4. In ChatGPT Plugins, add a custom MCP server and choose `Tunnel` as the
-   connection method. Select or paste the dedicated Bridge Tunnel ID.
-5. Scan tools and create the development connector/plugin.
-6. Verify tool catalog.
-7. Run minimal Green E2E:
-   ChatGPT -> Secure MCP Tunnel -> Bridge -> Codex, returning
-   `BRIDGE_SECURE_MCP_OK`.
-8. Verify `bind_project`, `run_task`, `task_result`, and Codex
-   thread/result return.
-9. Re-verify Blue remains READY in parallel.
-10. Test Green stop/start/reconnect and rollback without stopping Blue.
-11. Update this handoff/runtime evidence and create the next C/P.
-12. Only after explicit Owner `I/W` may master launcher / production docs /
+2. Re-verify Blue and Green are both READY before intentional interruption.
+3. Run the bounded Green STOP / rollback path and prove Blue remains READY.
+4. Confirm the ChatGPT Green connector becomes unavailable while Green is
+   intentionally stopped, without affecting Blue.
+5. Restart Green. Because Runtime API Key persistence is intentionally disabled,
+   the Owner must paste the dedicated key again only into the local secure
+   prompt; do not place it in ChatGPT or logs.
+6. Verify 18081 readyz, connector reconnection, tool catalog, and one minimal
+   post-restart Green task.
+7. Run the explicit rollback controller and verify it stops only Green while
+   preserving Blue.
+8. Restart Green once more if production acceptance wants Green left online.
+9. Update this handoff/runtime evidence and create the final candidate C/P.
+10. Only after explicit Owner `I/W` may master launcher / production docs /
     main integration be changed.
 
 Do not begin the upstream v1.5.0 upgrade audit until Bridge Secure MCP Green has
