@@ -31,10 +31,12 @@ export interface TransportTiming {
   readonly interruptGraceMs: number;
   readonly killGraceMs: number;
   readonly rpcCallTimeoutMs: number;
+  readonly protocolInactivityTimeoutMs?: number;
 }
 
 const CODEX_NODE_TARGET = ["@openai", "codex", "bin", "codex.js"] as const;
 const MAX_JSONL_FRAME_BYTES = 16 * 1024 * 1024;
+const MAX_PRE_RESPONSE_BYTES = 65_536;
 const DEFAULT_TIMING: TransportTiming = {
   interruptGraceMs: 5_000,
   killGraceMs: 2_000,
@@ -42,13 +44,14 @@ const DEFAULT_TIMING: TransportTiming = {
 };
 
 type PendingCall = {
+  readonly method: string;
   readonly resolve: (value: unknown) => void;
   readonly reject: (reason?: unknown) => void;
   readonly timer: NodeJS.Timeout;
 };
 
 function object(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function messageText(item: Record<string, unknown>): string | undefined {
@@ -157,6 +160,9 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     let interruptTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let exitImmediate: NodeJS.Immediate | undefined;
+    let inactivityTimer: NodeJS.Timeout | undefined;
+    let earlyNotifications: string[] = [];
+    let earlyBytes = 0;
 
     const rejectPending = (): void => {
       for (const [id, waiter] of this.pending) {
@@ -173,6 +179,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
       if (interruptTimer !== undefined) clearTimeout(interruptTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       if (exitImmediate !== undefined) clearImmediate(exitImmediate);
+      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       rejectPending();
       if (this.child === child) {
         this.child = undefined;
@@ -215,8 +222,19 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     const beginTermination = (result: CodexTaskResult, cooperativeMs: number): void => {
       if (settled || terminationResult !== undefined) return;
       terminationResult = result;
+      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       if (cooperativeMs === 0) sendTerm();
       else interruptTimer = setTimeout(sendTerm, cooperativeMs);
+    };
+
+    const resetInactivity = (): void => {
+      if (settled || terminationResult !== undefined) return;
+      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => beginTermination({
+        kind: "failed", error: "Codex app-server stopped responding.",
+        ...(output === "" ? {} : { output }),
+        ...(this.threadId === undefined ? {} : { threadId: this.threadId })
+      }, 0), this.timing.protocolInactivityTimeoutMs ?? 120_000);
     };
 
     this.beginInterrupt = (): void => {
@@ -239,97 +257,178 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     child.stdout.on("error", () => fail("Codex app-server communication failed."));
     child.stderr.on("error", () => fail("Codex app-server communication failed."));
     child.stderr.on("data", () => {});
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+    const handleLine = (rawLine: string): void => {
       if (settled) return;
-      buffer += chunk;
-      let newline: number;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const rawLine = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        if (Buffer.byteLength(rawLine, "utf8") > MAX_JSONL_FRAME_BYTES) {
-          fail("Codex app-server returned an oversized message.");
-          return;
-        }
-        const line = rawLine.trim();
-        if (line === "") continue;
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
+      if (Buffer.byteLength(rawLine, "utf8") > MAX_JSONL_FRAME_BYTES) {
+        fail("Codex app-server returned an oversized message.");
+        return;
+      }
+      const line = rawLine.trim();
+      if (line === "") return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        fail("Codex app-server returned an invalid message.");
+        return;
+      }
+      if (!object(parsed)) {
+        fail("Codex app-server returned an invalid message.");
+        return;
+      }
+
+      if ("id" in parsed) {
+        if (!(typeof parsed.id === "string" ||
+            (typeof parsed.id === "number" && Number.isSafeInteger(parsed.id))) ||
+            "method" in parsed || ("result" in parsed) === ("error" in parsed) ||
+            ("error" in parsed && (!object(parsed.error) ||
+              !Number.isInteger(parsed.error.code) || typeof parsed.error.message !== "string"))) {
           fail("Codex app-server returned an invalid message.");
           return;
         }
-        if (!object(parsed)) {
-          fail("Codex app-server returned an invalid message.");
-          return;
-        }
-
-        if (typeof parsed.id === "number" && ("result" in parsed || "error" in parsed)) {
-          const waiter = this.pending.get(parsed.id);
-          if (waiter !== undefined) {
-            this.pending.delete(parsed.id);
-            clearTimeout(waiter.timer);
-            if ("error" in parsed) waiter.reject(new Error("Codex app-server request failed."));
-            else waiter.resolve(parsed.result);
+        const waiter = typeof parsed.id === "number" ? this.pending.get(parsed.id) : undefined;
+        if (waiter !== undefined) {
+          // Bind response identities before coalesced notifications run.
+          if ("result" in parsed && ["thread/start", "turn/start"].includes(waiter.method)) {
+            const result = object(parsed.result) ? parsed.result : undefined;
+            const value = waiter.method === "turn/start" ? result?.turn : result?.thread;
+            if (!object(value) || typeof value.id !== "string" || value.id.length === 0) {
+              fail("Codex app-server returned an invalid message.");
+              return;
+            }
+            if (waiter.method === "turn/start") {
+              this.turnId = value.id;
+              resetInactivity();
+            } else this.threadId = value.id;
           }
-          continue;
-        }
-
-        if (typeof parsed.method !== "string") continue;
-        const params = object(parsed.params) ? parsed.params : {};
-        if (parsed.method === "turn/started") {
-          const turn = object(params.turn) ? params.turn : params;
-          if (params.threadId === this.threadId && typeof turn.id === "string" &&
-              (this.turnId === undefined || turn.id === this.turnId)) {
-            this.startedTurnId = turn.id;
-          }
-          continue;
-        }
-
-        const item = object(params.item) ? params.item : undefined;
-        if (parsed.method === "item/completed" && item?.type === "agentMessage") {
-          const text = messageText(item);
-          if (text !== undefined) {
-            output = text;
-            if (terminationResult?.kind === "interrupted") {
-              terminationResult = {
-                ...terminationResult,
-                output,
-                ...(this.threadId === undefined ? {} : { threadId: this.threadId })
-              };
+          this.pending.delete(parsed.id as number);
+          clearTimeout(waiter.timer);
+          if ("error" in parsed) {
+            waiter.reject(new Error("Codex app-server request failed."));
+            if (waiter.method !== "turn/interrupt") fail("Codex app-server request failed.");
+          } else {
+            waiter.resolve(parsed.result);
+            if (waiter.method === "turn/start") {
+              const early = earlyNotifications;
+              earlyNotifications = [];
+              earlyBytes = 0;
+              for (const notification of early) {
+                if (settled) break;
+                handleLine(notification);
+              }
             }
           }
-          continue;
         }
+        return;
+      }
 
-        if (parsed.method === "turn/completed") {
-          const turn = object(params.turn) ? params.turn : params;
-          const expectedTurnId = this.startedTurnId ?? this.turnId;
-          if (params.threadId !== this.threadId || typeof turn.id !== "string" ||
-              expectedTurnId === undefined || turn.id !== expectedTurnId) continue;
-          if (turn.status === "completed") {
-            finish({
-              kind: "completed",
+      if (typeof parsed.method !== "string" || "result" in parsed || "error" in parsed) {
+        fail("Codex app-server returned an invalid message.");
+        return;
+      }
+      const known = ["turn/started", "turn/completed", "item/completed"].includes(parsed.method);
+      if (known && !object(parsed.params)) {
+        fail("Codex app-server returned an invalid message.");
+        return;
+      }
+      const params = object(parsed.params) ? parsed.params : {};
+      if (known && this.turnId === undefined && params.threadId === this.threadId &&
+          [...this.pending.values()].some(({ method }) => method === "turn/start")) {
+        earlyBytes += Buffer.byteLength(rawLine, "utf8");
+        if (earlyBytes > MAX_PRE_RESPONSE_BYTES) fail("Codex app-server returned oversized early events.");
+        else earlyNotifications.push(rawLine);
+        return;
+      }
+      if (params.threadId === this.threadId && this.turnId !== undefined && params.turnId === this.turnId) {
+        resetInactivity();
+      }
+      if ((parsed.method === "turn/started" || parsed.method === "turn/completed") &&
+          (typeof params.threadId !== "string" || !object(params.turn) ||
+            typeof params.turn.id !== "string" || params.turn.id.length === 0)) {
+        fail("Codex app-server returned an invalid message.");
+        return;
+      }
+      if (parsed.method === "turn/started") {
+        const turn = object(params.turn) ? params.turn : params;
+        if (params.threadId === this.threadId && typeof turn.id === "string" &&
+            turn.id === this.turnId) {
+          this.startedTurnId = turn.id;
+          resetInactivity();
+        }
+        return;
+      }
+
+      const item = object(params.item) ? params.item : undefined;
+      if (parsed.method === "item/completed" && item?.type === "agentMessage") {
+        if (this.turnId === undefined || params.threadId !== this.threadId || params.turnId !== this.turnId) return;
+        const text = messageText(item);
+        if (text === undefined) {
+          fail("Codex app-server returned an invalid message.");
+          return;
+        }
+        if (text !== undefined) {
+          output = text;
+          if (terminationResult?.kind === "interrupted") {
+            terminationResult = {
+              ...terminationResult,
               output,
               ...(this.threadId === undefined ? {} : { threadId: this.threadId })
-            });
-          } else if (turn.status === "interrupted") {
-            finish({
-              kind: "interrupted",
-              output,
-              ...(this.threadId === undefined ? {} : { threadId: this.threadId })
-            });
-          } else if (turn.status === "failed") {
-            fail("Codex task failed.");
-          } else {
-            fail("Codex app-server returned an invalid task state.");
+            };
           }
         }
+        return;
       }
-      if (Buffer.byteLength(buffer, "utf8") > MAX_JSONL_FRAME_BYTES) {
+      if (parsed.method === "item/completed" && item === undefined) {
+        fail("Codex app-server returned an invalid message.");
+        return;
+      }
+
+      if (parsed.method === "turn/completed") {
+        const turn = object(params.turn) ? params.turn : params;
+        const expectedTurnId = this.startedTurnId ?? this.turnId;
+        if (params.threadId !== this.threadId || typeof turn.id !== "string" ||
+            expectedTurnId === undefined || turn.id !== expectedTurnId) return;
+        if (turn.status === "completed") {
+          finish({
+            kind: "completed",
+            output,
+            ...(this.threadId === undefined ? {} : { threadId: this.threadId })
+          });
+        } else if (turn.status === "interrupted") {
+          finish({
+            kind: "interrupted",
+            output,
+            ...(this.threadId === undefined ? {} : { threadId: this.threadId })
+          });
+        } else if (turn.status === "failed") {
+          fail("Codex task failed.");
+        } else {
+          fail("Codex app-server returned an invalid task state.");
+        }
+      }
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      try { buffer += decoder.decode(chunk, { stream: true }); }
+      catch { fail("Codex app-server returned invalid UTF-8."); return; }
+      let newline: number;
+      while (!settled && (newline = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        handleLine(line);
+      }
+      if (!settled && Buffer.byteLength(buffer, "utf8") > MAX_JSONL_FRAME_BYTES) {
         fail("Codex app-server returned an oversized message.");
       }
+    });
+    child.stdout.on("end", () => {
+      if (settled) return;
+      try { buffer += decoder.decode(); }
+      catch { fail("Codex app-server returned invalid UTF-8."); return; }
+      const line = buffer;
+      buffer = "";
+      handleLine(line);
     });
 
     const finishFromExit = (code: number | null): void => {
@@ -358,28 +457,25 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
 
     try {
       await this.call("initialize", { clientInfo: { name: "engineering-bridge", version: VERSION } });
+      if (settled) return terminalPromise;
       this.notify("initialized", {});
       const routingParams = {
         ...(request.model === undefined ? {} : { model: request.model }),
         ...(request.service_tier === undefined ? {} : { serviceTier: request.service_tier })
       };
       const threadResult = await this.call("thread/start", { cwd: this.workspaceRoot, ...routingParams });
+      if (settled) return terminalPromise;
       if (!object(threadResult) || !object(threadResult.thread) || typeof threadResult.thread.id !== "string") {
         throw new Error("Invalid thread response.");
       }
       this.threadId = threadResult.thread.id;
-      const turnResult = await this.call("turn/start", {
+      await this.call("turn/start", {
         threadId: this.threadId,
         input: [{ type: "text", text: request.instruction }],
         cwd: this.workspaceRoot,
         ...routingParams,
         ...(request.reasoning === undefined ? {} : { effort: request.reasoning })
       });
-      if (!object(turnResult) || !object(turnResult.turn) || typeof turnResult.turn.id !== "string") {
-        throw new Error("Invalid task response.");
-      }
-      this.turnId = turnResult.turn.id;
-      if (this.startedTurnId !== this.turnId) this.startedTurnId = undefined;
     } catch {
       if (!settled) fail("Codex app-server request failed.");
     }
@@ -407,7 +503,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
         this.pending.delete(id);
         waiter.reject(new Error("Codex app-server request timed out."));
       }, this.timing.rpcCallTimeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, method });
       try {
         child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
       } catch {

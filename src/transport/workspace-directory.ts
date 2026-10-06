@@ -1,8 +1,9 @@
 import { realpathSync } from "node:fs";
 import { lstat, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
-import { isAbsolute, normalize, relative, sep } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 
 import { isId, newId } from "../core/ids.js";
+import { isWorkspaceRoot } from "./workspace-paths.js";
 
 export interface WorkspaceEntry {
   readonly id: string;
@@ -18,6 +19,7 @@ type Registration = {
   readonly id: string;
   readonly root: string;
   readonly canonicalRoot: string;
+  readonly manual: boolean;
 };
 
 const STATE_VERSION = 1;
@@ -33,14 +35,16 @@ export class WorkspaceDirectory {
     private readonly projectRoots: readonly string[],
     private readonly stateFilePath: string
   ) {
+    if (!projectRoots.every((root) => isWorkspaceRoot(root))) {
+      throw new Error("Workspace configuration is invalid.");
+    }
     for (const entry of entries) {
       if (typeof entry.id !== "string" || entry.id.length === 0 ||
-          typeof entry.root !== "string" || entry.root.length === 0 ||
-          !isAbsolute(entry.root) || normalize(entry.root) !== entry.root ||
+          !isWorkspaceRoot(entry.root) ||
           this.registrations.has(entry.id)) {
         throw new Error("Workspace configuration is invalid.");
       }
-      this.add(entry.id, entry.root);
+      this.add(entry.id, entry.root, true);
     }
   }
 
@@ -63,11 +67,11 @@ export class WorkspaceDirectory {
       throw new Error("Workspace registrations could not be loaded.");
     }
 
+    this.refreshManualCanonicalRoots();
     for (const item of value.workspaces) {
       if (!isObject(item)) continue;
       const { id, root } = item;
-      if (typeof id !== "string" || !isId(id) || typeof root !== "string" || root.length === 0 ||
-          !isAbsolute(root) || normalize(root) !== root || this.registrations.has(id)) {
+      if (typeof id !== "string" || !isId(id) || !isWorkspaceRoot(root) || this.registrations.has(id)) {
         continue;
       }
       if (this.canonicalRoots.has(bestEffortCanonicalRoot(root))) continue;
@@ -92,6 +96,7 @@ export class WorkspaceDirectory {
     if (!isDirectory) throw new Error("Project path is not an existing directory.");
 
     const mutation = this.mutationQueue.then(async (): Promise<BoundWorkspace> => {
+      this.refreshManualCanonicalRoots();
       const existingId = this.canonicalRoots.get(canonical);
       if (existingId !== undefined) {
         const existing = this.registrations.get(existingId);
@@ -113,10 +118,18 @@ export class WorkspaceDirectory {
     return mutation;
   }
 
-  private add(id: string, root: string): void {
+  private add(id: string, root: string, manual = false): void {
     const canonicalRoot = bestEffortCanonicalRoot(root);
-    this.registrations.set(id, { id, root, canonicalRoot });
+    this.registrations.set(id, { id, root, canonicalRoot, manual });
     if (!this.canonicalRoots.has(canonicalRoot)) this.canonicalRoots.set(canonicalRoot, id);
+  }
+
+  private refreshManualCanonicalRoots(): void {
+    this.canonicalRoots.clear();
+    for (const [id, registration] of this.registrations) {
+      const root = registration.manual ? bestEffortCanonicalRoot(registration.root) : registration.canonicalRoot;
+      if (!this.canonicalRoots.has(root)) this.canonicalRoots.set(root, id);
+    }
   }
 
   private async canonicalizeWithinProjectRoots(path: string): Promise<string> {
@@ -163,7 +176,7 @@ export class WorkspaceDirectory {
 
 function bestEffortCanonicalRoot(root: string): string {
   try {
-    return realpathSync(root);
+    return realpathSync.native(root);
   } catch {
     return root;
   }

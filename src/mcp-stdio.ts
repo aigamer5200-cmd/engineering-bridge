@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { readFile } from "node:fs/promises";
-import { isAbsolute, normalize } from "node:path";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -71,11 +70,6 @@ async function main(): Promise<void> {
   ));
   const workspaceEntries = parsed.filter((entry): entry is WorkspaceEntry => !isProjectRootEntry(entry));
   const projectRootEntries = parsed.filter(isProjectRootEntry);
-  for (const entry of projectRootEntries) {
-    if (!isAbsolute(entry.root) || normalize(entry.root) !== entry.root) {
-      throw new Error("Workspace configuration is invalid.");
-    }
-  }
 
   const workspaces = new WorkspaceDirectory(
     workspaceEntries,

@@ -41,7 +41,9 @@ function fakeStarter(invocations: Invocation[], output = "transport-ok", hold = 
             queueMicrotask(() => {
               send({ id: message.id, result: { turn: { id: "turn-1" } } });
               send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-1" } } });
-              send({ method: "item/completed", params: { item: { type: "agentMessage", text: output } } });
+              send({ method: "item/completed", params: {
+                threadId: "thread-1", turnId: "turn-1", item: { type: "agentMessage", text: output }
+              } });
               if (hold) return;
               send({ method: "turn/completed", params: {
                 threadId: "thread-1", turn: { id: "turn-1", status: "completed" }
@@ -78,6 +80,7 @@ test("omitted routing remains byte-for-byte minimal on the official app-server",
     PATH: "C:\\bin",
     USERPROFILE: "C:\\Users\\tester",
     CODEX_HOME: "C:\\Users\\tester\\.codex",
+    ENGINEERING_BRIDGE_CODEX_ROUTING_POLICY: "explicit",
     BRIDGE_TEST_UNLISTED: "preserve exactly: spaces & punctuation!"
   };
   const transport = new CodexAppServerTransport(
@@ -127,6 +130,23 @@ test("omitted routing remains byte-for-byte minimal on the official app-server",
     "networkAccess", "webSearch", "account", "profile"
   ]) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+});
+
+test("each routing dimension remains independently optional without provider policy selection", async () => {
+  for (const routing of [{ model: "owner-exact" }, { reasoning: "max" }, { service_tier: "standard" }]) {
+    const invocations: Invocation[] = [];
+    const transport = new CodexAppServerTransport(WORKSPACE, fakeStarter(invocations), {}, "win32");
+    assert.equal((await transport.execute({ instruction: "inspect", ...routing })).kind, "completed");
+    const thread = messages(invocations[0]!).find((m) => m.method === "thread/start")?.params;
+    const turn = messages(invocations[0]!).find((m) => m.method === "turn/start")?.params;
+    const nativeRouting = {
+      ...("model" in routing ? { model: routing.model } : {}),
+      ...("service_tier" in routing ? { serviceTier: routing.service_tier } : {})
+    };
+    assert.deepEqual(thread, { cwd: WORKSPACE, ...nativeRouting });
+    assert.deepEqual(turn, { cwd: WORKSPACE, threadId: "thread-1", input: [{ type: "text", text: "inspect" }],
+      ...nativeRouting, ...("reasoning" in routing ? { effort: routing.reasoning } : {}) });
   }
 });
 
