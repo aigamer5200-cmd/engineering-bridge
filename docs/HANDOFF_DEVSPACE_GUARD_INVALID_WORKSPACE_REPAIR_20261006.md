@@ -45,6 +45,10 @@ Observed failure:
 
 ## Current integration state
 
-- Live runtime hotfix is active.
-- Git integration still requires Owner I/W.
+- Owner-authorized I/W completed on 2026-10-06.
+- Cloud and physical local `main` are aligned to the integrated repair.
+- Canonical recovery source has been redeployed to the active Blue/Green
+  control locations.
+- Live runtime hotfix remains active and matches the Git-tracked canonical
+  guard proxy.
 - Do not restart or replace Blue rollback solely for this repair.
