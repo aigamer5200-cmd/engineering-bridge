@@ -1,7 +1,7 @@
 # HANDOFF — Engineering Bridge Dedicated Secure MCP Tunnel
 
 Date: 2026-10-06
-Status: FINAL CANDIDATE ACCEPTED — dedicated Bridge Secure MCP Green connector, Codex E2E, stop/start/reconnect, and rollback validation all passed; Green restored online and Blue remains live in parallel; awaiting explicit Owner I/W for production/main integration
+Status: PRODUCTION I/W COMPLETED — dedicated Bridge Secure MCP Green connector, Codex E2E, stop/start/reconnect, rollback, master-launcher integration, and post-sync production smoke all passed; Green and Blue remain live in parallel
 
 ## Repo / branch / WT
 
@@ -354,9 +354,33 @@ Final lifecycle acceptance result: **PASS**.
 
 ## Next action: Owner I/W gate
 
-No further candidate/runtime validation is required before integration.
+Owner explicitly authorized `I/W` after final candidate acceptance. Production
+integration was then performed without changing the Bridge binary version.
 
-Current accepted final candidate state:
+Production I/W actions completed:
+
+- Added Bridge Secure MCP Green to the canonical `START_ALL_CHANNELS.bat` flow
+  after Blue rollback readiness.
+- Added Bridge Secure MCP status to `CHECK_CHANNELS.bat`.
+- Added Git-tracked `STOP_ALL_CHANNELS.bat` and `RESTART_ALL_CHANNELS.bat` so
+  the deployed full-stack lifecycle no longer exists only as local drift.
+- Kept `START_BRIDGE_CHANNEL.bat` / unattended Bridge recovery Blue-only by
+  design so Recovery never waits for interactive secret input.
+- Synchronized the committed recovery/control files to
+  `D:\Engineering_Bridge_System\control` after creating a rollback backup.
+- Synchronized the short current-status knowledge mirror to
+  `D:\Engineering_Bridge_System\HANDOFF_BRIDGE_SECURE_MCP_CURRENT_STATUS.md`.
+- Fast-forwarded local `main` from the pre-I/W base to the accepted production
+  integration history.
+- Ran the deployed master launcher after sync; it exited 0 with DevSpace Green,
+  DevSpace Blue, Bridge Green, Bridge Blue, Bridge public OAuth, Cloudflare
+  metrics, and Engineering Recovery all READY.
+
+Bridge production binary remains `1.4.2-biaogu.15`. This phase changes ingress
+and recovery/control-plane authority only; it does not perform the deferred
+upstream v1.5.0 audit/upgrade.
+
+Current accepted production state:
 
 - Green Secure MCP Tunnel: READY and left online.
 - Blue Cloudflare/:8768 rollback lane: READY and left online.
@@ -367,17 +391,9 @@ Current accepted final candidate state:
 - DevSpace Secure MCP production: untouched.
 - upstream v1.5.0 upgrade audit: not started.
 
-The next state-changing step requires explicit Owner `I/W`. After that approval:
-
-1. Integrate the accepted Bridge Secure MCP candidate into `main`.
-2. Update the production/master launcher so the new official Secure MCP Bridge
-   lane is available in the intended canonical control surface while preserving
-   the Blue rollback path.
-3. Update production docs/current-version records with the accepted Green/Blue
-   architecture and rollback instructions.
-4. Run bounded post-I/W production smoke checks.
-5. Only after this Bridge migration is fully closed may the separate upstream
-   v1.5.0 upgrade audit begin.
+This migration is closed after final Git/ref/knowledge synchronization and one
+last post-I/W Green+Blue health/E2E check. The separate upstream v1.5.0 audit is
+the next bounded phase, not part of this I/W.
 
 Do not begin the upstream v1.5.0 upgrade audit until Bridge Secure MCP Green has
 completed production acceptance. Upstream fetch currently exposes v1.5.0 /

@@ -1,6 +1,7 @@
 # Engineering Bridge Secure MCP — Current Production Status
 
 Updated: 2026-10-06
+Production I/W: completed
 
 This is the short current-state knowledge handoff for Engineering Bridge ingress.
 Detailed implementation and validation evidence lives in
@@ -37,6 +38,13 @@ ChatGPT -> Bridge ingress differs between Green and Blue.
 
 - Bridge runtime version remains `1.4.2-biaogu.15`; this ingress integration is
   not an upstream Bridge binary upgrade.
+- The accepted Secure MCP ingress candidate was integrated into local `main`
+  by fast-forward after final lifecycle acceptance.
+- The Git-tracked recovery/control source was synchronized to
+  `D:\Engineering_Bridge_System\control` with a pre-I/W backup retained under
+  `D:\Engineering_Bridge_System\backups\control`.
+- The deployed knowledge mirror is
+  `D:\Engineering_Bridge_System\HANDOFF_BRIDGE_SECURE_MCP_CURRENT_STATUS.md`.
 - Green profile: `engineering-bridge`.
 - Green local health port: `18081`.
 - Green runtime root: `D:\Engineering_Bridge_System\BridgeSecureTunnel`.
@@ -59,6 +67,11 @@ All of the following passed before production I/W:
 - Final Green restore E2E -> `BRIDGE_SECURE_MCP_FINAL_OK`.
 - Green `/readyz` returned HTTP 200 after final restore.
 - Blue Cloudflare metrics returned HTTP 200 after final restore.
+- After production control synchronization, the real
+  `D:\Engineering_Bridge_System\control\START_ALL_CHANNELS.bat` completed with
+  exit 0 while DevSpace Green, DevSpace Blue, Bridge Green, Bridge Blue,
+  Bridge public OAuth, Cloudflare metrics, and Engineering Recovery were all
+  reported READY.
 
 ## Canonical controls
 
