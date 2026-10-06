@@ -1,5 +1,17 @@
 # Release notes
 
+## v1.4.2-biaogu.16
+
+This release selectively reconciles upstream v1.5.0 hardening into the active four-tool thin transport without merging the upstream feature surface.
+
+### Selective upstream hardening
+
+- hardens Codex app-server JSONL protocol parsing, identity correlation, UTF-8 handling, EOF handling, early-event buffering, and inactivity detection;
+- retains the fork 16 MiB JSONL frame bound rather than upstream 8 MiB;
+- hardens Windows workspace root/canonical identity handling, including drive/UNC validation and late manual-path canonical refresh;
+- preserves optional task-local model/reasoning/service-tier routing and native omitted-field behavior instead of importing upstream explicit-routing enforcement;
+- keeps the MCP surface at exactly four tools and does not restore controlled-patch, APPLY/COMMIT, validation, or async-validation surfaces.
+
 ## v1.4.2-biaogu.15
 
 This release adds a minimal task-local routing passthrough to the active thin

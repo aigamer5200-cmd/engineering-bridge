@@ -1,6 +1,6 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.15 是一個本機 MCP STDIO transport，直接連接
+Engineering Bridge 1.4.2-biaogu.16 是一個本機 MCP STDIO transport，直接連接
 官方 Codex CLI app-server。Codex CLI 與本機設定負責模型選擇及原生執行行為；
 Bridge 負責啟動 task、回報 task 狀態與輸出，以及中斷執行中的 task。
 

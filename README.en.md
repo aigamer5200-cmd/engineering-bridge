@@ -1,6 +1,6 @@
 # Engineering Bridge
 
-Engineering Bridge 1.4.2-biaogu.15 is a local MCP STDIO transport for the
+Engineering Bridge 1.4.2-biaogu.16 is a local MCP STDIO transport for the
 official Codex CLI app-server. The CLI and its local configuration own model
 selection and native execution behavior. Bridge starts tasks, returns their
 state and output, and can interrupt a running task.
