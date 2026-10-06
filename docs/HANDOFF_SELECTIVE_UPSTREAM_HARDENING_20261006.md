@@ -96,3 +96,19 @@ ordinary UNC acceptance is lexical, not a live network-share probe.
 - A different Codex account/session can resume directly from this document,
   current branch and worktree state without the prior native thread. Use a new
   account-bound thread; do not cross-account resume.
+
+## Owner I/W integration — 2026-10-06
+
+- Authorization ID: `owner-iw-20261006-selective-upstream-hardening`.
+- Owner explicitly authorized `I/W` after candidate acceptance.
+- `main` was verified clean and exactly at `f4e19a3f2a1300ff94992ef7fe721e9ae5b2a1b4`; `origin/main` matched before integration.
+- Candidate `bbf1b1c7c447151734688075e7c129a1a61fd582` was integrated by `git merge --ff-only`; no conflicts and no merge rewrite.
+- Integration verification on `main`: focused **52/52 PASS**; full `npm test` **413 total / 408 PASS / 0 FAIL / 5 SKIP**.
+- Active MCP surface remains 4 tools; 16 MiB JSONL frame bound and Owner-approved routing/account/GOAL/TG semantics remain unchanged.
+- No production activation, Secure MCP Green/Cloudflare Blue change, runtime deployment, or upstream merge was performed.
+- The commit containing this section is the integration checkpoint following the Owner I/W authorization.
+- Repository should be clean after this documentation checkpoint and push. A fresh account/session can continue from `main` plus this HANDOFF without the prior Codex thread.
+
+### Post-I/W state
+
+Selective upstream hardening is integrated into `main`. Further production/runtime activation, if ever desired, is a separate Owner-authorized phase and is not implied by this I/W.
