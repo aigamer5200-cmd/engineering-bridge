@@ -157,3 +157,25 @@ acceptance has happened. A fresh session can continue from this HANDOFF plus
 repo state without depending on the previous native session. Notification is
 owned by the outer supervisor; this internal
 child returns evidence without Telegram.
+
+## Owner I/W + deployed-script integration result — 2026-10-07
+
+- Owner explicitly authorized `I/W`.
+- `main` fast-forwarded from `910c27c5c3d6b1048e71b9e5a54c3599cf011ad6` to candidate checkpoint `4a3c4896621b8fa86ea141351a11ad6afdd7da68`.
+- Post-integration build PASS; focused DPAPI/recovery suite 5/5 PASS on `main`.
+- Deployed central control files: `SecureMcpRuntimeKey.ps1`, `SetSecureMcpRuntimeKey.ps1`, `SET_Secure_MCP_Runtime_API_Key.bat`, `SecureMcpBridge.ps1`, `SetupSecureMcpBridge.ps1`.
+- Deployed DevSpace Green controller to the active secure-control location: `D:/Engineering_Bridge_System/DevSpace/canary/secure-tunnel-beta/control/SecureMcpDevSpace.ps1`.
+- All deployed-script SHA256 values matched their canonical repo source copies.
+- Both active tunnel profiles still contain only `api_key: "env:CONTROL_PLANE_API_KEY"`; no plaintext key was written to profile/config/BAT/Git/log/manifest.
+- Existing deployed controllers were backed up under `D:/Engineering_Bridge_System/runtime/painless-upgrade/control-backups/secure-mcp-dpapi-runtime-key-20261007`.
+- Current DPAPI store status after deployment: **MISSING/UNAVAILABLE**. This is expected because no plaintext Runtime API Key was persisted previously and the supervisor process has no `CONTROL_PLANE_API_KEY` value.
+- No attempt was made to extract the key from tunnel-client process memory. The encrypted store therefore still requires one final Owner-provided existing/replacement Runtime API Key via `D:/Engineering_Bridge_System/control/SET_Secure_MCP_Runtime_API_Key.bat`.
+- A live `START_ALL_CHANNELS.bat` adoption run did not require a key while both Green tunnels were already running. That management call temporarily disconnected the supervisor's Secure MCP DevSpace control session; independent Blue-path readback proved the production runtimes stayed healthy.
+- Independent channel readback after deployment: DevSpace Green/Blue READY; Bridge Green/Blue READY; Bridge public OAuth/tunnel metrics READY; Engineering Recovery READY.
+- Production Bridge runtime remains `1.4.2-biaogu.16`; this I/W changed controller/credential handling only.
+
+### Remaining activation gate
+
+DPAPI source integration and deployed controllers are complete, but **no-prompt cold start/restart acceptance is not yet complete** until the encrypted store is seeded once. After the Owner runs `SET_Secure_MCP_Runtime_API_Key.bat` once and enters the Runtime API Key, verify `SetSecureMcpRuntimeKey.ps1 -Check`, then perform a real total stop/start/restart and confirm both Green tunnels come back without any Runtime API Key prompt. Until that one-time seed, do not intentionally stop both Green tunnels unless Blue rollback is sufficient.
+
+A fresh account/session can resume from this HANDOFF plus current `main` without the prior native thread.
