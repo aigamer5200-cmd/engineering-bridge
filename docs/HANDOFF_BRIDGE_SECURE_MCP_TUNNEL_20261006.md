@@ -1,7 +1,7 @@
 # HANDOFF — Engineering Bridge Dedicated Secure MCP Tunnel
 
 Date: 2026-10-06
-Status: dedicated Bridge Secure MCP Green connector and end-to-end Codex path verified successfully; next boundary is deliberate stop/start/reconnect + rollback validation before production I/W
+Status: FINAL CANDIDATE ACCEPTED — dedicated Bridge Secure MCP Green connector, Codex E2E, stop/start/reconnect, and rollback validation all passed; Green restored online and Blue remains live in parallel; awaiting explicit Owner I/W for production/main integration
 
 ## Repo / branch / WT
 
@@ -256,24 +256,128 @@ STATUS_Secure_MCP_Bridge.bat = exit 0
 Blue Cloudflare metrics 20242 = HTTP 200
 ```
 
-## Next action: deliberate lifecycle / rollback validation
+## Lifecycle / rollback final acceptance
 
-1. Refresh/fetch and verify branch HEAD still matches the C/P checkpoint.
-2. Re-verify Blue and Green are both READY before intentional interruption.
-3. Run the bounded Green STOP / rollback path and prove Blue remains READY.
-4. Confirm the ChatGPT Green connector becomes unavailable while Green is
-   intentionally stopped, without affecting Blue.
-5. Restart Green. Because Runtime API Key persistence is intentionally disabled,
-   the Owner must paste the dedicated key again only into the local secure
-   prompt; do not place it in ChatGPT or logs.
-6. Verify 18081 readyz, connector reconnection, tool catalog, and one minimal
-   post-restart Green task.
-7. Run the explicit rollback controller and verify it stops only Green while
-   preserving Blue.
-8. Restart Green once more if production acceptance wants Green left online.
-9. Update this handoff/runtime evidence and create the final candidate C/P.
-10. Only after explicit Owner `I/W` may master launcher / production docs /
-    main integration be changed.
+The lifecycle and rollback phase was executed deliberately against the live
+candidate with Blue kept online throughout.
+
+### 1. Green STOP validation
+
+- Precheck: feature HEAD matched origin and both Blue/Green were READY.
+- `STOP_Secure_MCP_Bridge.bat` completed with:
+
+```text
+Secure MCP Bridge Green : STOPPED
+Blue Bridge rollback     : READY / UNCHANGED
+SECURE_MCP_BRIDGE_STOP_PASS
+```
+
+- The ChatGPT `Engineering_Bridge_SecureTunnel` connector then failed as
+  expected with `McpServerError: Session terminated`.
+- The legacy/Blue `Engineering_Bridge` connector remained reachable and could
+  still bind the same WT.
+- A real Blue -> Codex task completed with exact output:
+
+```text
+BRIDGE_BLUE_AFTER_GREEN_STOP_OK
+```
+
+This proves Green failure/stop does not remove the last-known-good Blue lane.
+
+### 2. Green restart / reconnect validation
+
+- Owner re-entered the Runtime API Key only in the local secure prompt.
+- Green restarted on a new tunnel-client PID and independently reported:
+
+```text
+STATUS_EXIT=0
+18081 /readyz = HTTP 200
+Blue Bridge rollback = READY
+```
+
+- The existing ChatGPT SecureTunnel connector recovered without being recreated.
+- A new Green -> Codex task completed with exact output:
+
+```text
+BRIDGE_SECURE_MCP_RESTART_OK
+```
+
+This proves stop/start does not require rebuilding the ChatGPT connector and the
+Tunnel/Bridge/Codex path reconnects correctly.
+
+### 3. Explicit ROLLBACK validation
+
+- `ROLLBACK_Secure_MCP_Bridge.bat` intentionally stopped only Green and printed:
+
+```text
+ROLLBACK PASS: Cloudflare Engineering Bridge remains the last-known-good lane.
+Green profile/setup were preserved.
+```
+
+- SecureTunnel connector again became unavailable as expected.
+- Blue connector remained usable and a real Blue -> Codex task completed with
+  exact output:
+
+```text
+BRIDGE_ROLLBACK_BLUE_OK
+```
+
+- Blue Cloudflare metrics remained HTTP 200.
+
+This proves the explicit rollback controller preserves the old production lane
+and keeps the Green setup/profile available for restoration.
+
+### 4. Final Green restore
+
+- Owner re-entered the Runtime API Key locally one final time.
+- Launcher reported `SECURE_MCP_BRIDGE_START_PASS`.
+- Independent final verification reported:
+
+```text
+Blue Bridge rollback = READY
+Green tunnel health 18081 = READY PID 33064
+Green readyz = HTTP 200
+STATUS_Secure_MCP_Bridge.bat = exit 0
+Blue Cloudflare metrics 20242 = HTTP 200
+```
+
+- The existing ChatGPT `Engineering_Bridge_SecureTunnel` connector again
+  recovered automatically.
+- Final end-to-end SecureTunnel -> Bridge -> Codex smoke completed with exact
+  output:
+
+```text
+BRIDGE_SECURE_MCP_FINAL_OK
+```
+
+Final lifecycle acceptance result: **PASS**.
+
+## Next action: Owner I/W gate
+
+No further candidate/runtime validation is required before integration.
+
+Current accepted final candidate state:
+
+- Green Secure MCP Tunnel: READY and left online.
+- Blue Cloudflare/:8768 rollback lane: READY and left online.
+- ChatGPT SecureTunnel connector: connected and verified through Codex.
+- stop/start/reconnect: PASS.
+- explicit rollback to Blue: PASS.
+- Runtime API Key persistence: intentionally disabled.
+- DevSpace Secure MCP production: untouched.
+- upstream v1.5.0 upgrade audit: not started.
+
+The next state-changing step requires explicit Owner `I/W`. After that approval:
+
+1. Integrate the accepted Bridge Secure MCP candidate into `main`.
+2. Update the production/master launcher so the new official Secure MCP Bridge
+   lane is available in the intended canonical control surface while preserving
+   the Blue rollback path.
+3. Update production docs/current-version records with the accepted Green/Blue
+   architecture and rollback instructions.
+4. Run bounded post-I/W production smoke checks.
+5. Only after this Bridge migration is fully closed may the separate upstream
+   v1.5.0 upgrade audit begin.
 
 Do not begin the upstream v1.5.0 upgrade audit until Bridge Secure MCP Green has
 completed production acceptance. Upstream fetch currently exposes v1.5.0 /
