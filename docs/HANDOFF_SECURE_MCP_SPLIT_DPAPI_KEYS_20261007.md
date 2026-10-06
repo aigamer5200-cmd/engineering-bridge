@@ -118,3 +118,29 @@ and live validation. This internal child does not commit/push and returns
 evidence immediately without Telegram;
 the outer supervisor owns notification. No current production acceptance is
 claimed, and no secret values are part of the evidence.
+
+## Owner I/W + split deployed-controller integration — 2026-10-07
+
+- Owner explicitly authorized `I/W`.
+- `main` fast-forwarded from `4c072dd4699dd8af09c83c1716276649a59dd574` to candidate checkpoint `c745e917c8f80615621ae36826c64b9d26cc7188`.
+- Post-integration build PASS and focused split-DPAPI/recovery suite 6/6 PASS on `main`.
+- Pre-deployment store presence check: obsolete shared store absent; DevSpace split store absent; Bridge split store absent. No secret migration was required.
+- Deployed canonical split files to `D:/Engineering_Bridge_System/control`: `SecureMcpRuntimeKey.ps1`, `SetSecureMcpRuntimeKey.ps1`, singular compatibility BAT, plural `SET_Secure_MCP_Runtime_API_Keys.bat`, `SecureMcpBridge.ps1`, and `SetupSecureMcpBridge.ps1`.
+- Deployed split DevSpace controller to `D:/Engineering_Bridge_System/DevSpace/canary/secure-tunnel-beta/control/SecureMcpDevSpace.ps1`.
+- Existing deployed scripts were backed up under `D:/Engineering_Bridge_System/runtime/painless-upgrade/control-backups/split-dpapi-20261007`.
+- Deployed-file SHA256 readback matched repo canonical source for every deployed split file.
+- Active profiles for both tunnels still contain only `api_key: "env:CONTROL_PLANE_API_KEY"`; no plaintext key was persisted.
+- Split store check after deployment: DevSpace store MISSING/UNAVAILABLE; Bridge store MISSING/UNAVAILABLE; obsolete shared store still absent. This is the expected pre-seed state.
+- No attempt was made to read/extract either Runtime API Key from process memory, environment dumps, logs, profiles, manifests, or running tunnel processes.
+- Production Bridge runtime remains `1.4.2-biaogu.16`; tunnel IDs, routing, GOAL, Cloudflare Blue, and Recovery Blue-only boundaries are unchanged.
+- Post-deployment live status: Engineering Bridge Secure MCP Green READY, Bridge Blue rollback READY; DevSpace Green READY, DevSpace Blue rollback READY; Engineering Recovery READY. Existing Green processes were not restarted.
+
+### Remaining activation gate
+
+The split DPAPI code and deployed controllers are complete. The only remaining step is one local one-time seed of two distinct Owner-provided keys via:
+
+`D:/Engineering_Bridge_System/control/SET_Secure_MCP_Runtime_API_Keys.bat`
+
+The setup prompts first for the DevSpace Runtime API Key, then for the Engineering Bridge Runtime API Key, stores each only in its own DPAPI CurrentUser ciphertext file, and never echoes either value. After both stores are available, run `SetSecureMcpRuntimeKey.ps1 -Purpose All -Check`, then perform a real total stop/start/restart and verify no Runtime API Key prompt, both Green/Blue lanes healthy, and connector E2E. Until both stores are seeded, do not intentionally cold-stop both Green tunnels unless Blue rollback is acceptable.
+
+A fresh account/session can resume from this HANDOFF plus current `main` without relying on the prior native thread.
