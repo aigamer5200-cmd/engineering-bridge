@@ -74,3 +74,20 @@ npm test
 
 舊 governance 與 proposal modules 仍保留在 source tree 供相容性使用，但 active
 MCP composition 不會載入它們。
+
+## Secure MCP split Runtime API keys source candidate
+
+DevSpace Secure MCP Green and Engineering Bridge Secure MCP Green use two distinct
+keys and two distinct stores, encrypted with Windows DPAPI CurrentUser:
+`secure-mcp-devspace-runtime-api-key.dpapi` and
+`secure-mcp-bridge-runtime-api-key.dpapi` under
+`D:\Engineering_Bridge_System\runtime\secrets`.
+After Owner I/W and deployment, `SET_Secure_MCP_Runtime_API_Keys.bat` securely
+sets up each missing key independently, preserving valid stores by default.
+Normal Start is non-interactive: deliberate process env -> controller-specific
+store -> bounded setup instructions. Profiles remain env-only; unattended
+recovery remains Blue-only. The obsolete shared store is unseeded and must not
+be used. Current deployed shared-store controllers remain untouched in this
+source-only candidate. No commit/push/IW or live acceptance is implied.
+See [split-key durable HANDOFF](docs/HANDOFF_SECURE_MCP_SPLIT_DPAPI_KEYS_20261007.md)
+for validation, deployment gates and fresh-session resume.

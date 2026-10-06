@@ -77,31 +77,47 @@ end-to-end through Codex. Green stop/start reconnects the existing connector;
 the connector does not need to be recreated. Explicit rollback stops only Green
 and leaves Blue available.
 
-### One-time Runtime API key setup (source candidate; pending Owner I/W)
+### One-time Runtime API keys setup (split source candidate; pending Owner I/W)
+
+Two distinct keys and two distinct stores are required:
+
+- DevSpace: `D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-devspace-runtime-api-key.dpapi`
+- Bridge: `D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-bridge-runtime-api-key.dpapi`
 
 After authorized deployment, run central
-`D:\Engineering_Bridge_System\control\SET_Secure_MCP_Runtime_API_Key.bat`
-once as the same Windows user that runs both Green controllers. It invokes
-`SetSecureMcpRuntimeKey.ps1 -IfMissing`, securely prompts once with `Read-Host
--AsSecureString` when no process env key exists, and leaves an existing valid
-store untouched. If a key is explicitly available as process
-`CONTROL_PLANE_API_KEY`, setup uses it without prompting. Never pass a key on a
-command line or save it in an env file. Explicit empty env input fails closed.
+`D:\Engineering_Bridge_System\control\SET_Secure_MCP_Runtime_API_Keys.bat`
+once as the controller Windows user. It invokes
+`SetSecureMcpRuntimeKey.ps1 -Purpose All -IfMissing`, securely prompts for
+DevSpace Runtime API Key, then Bridge Runtime API Key using `Read-Host
+-AsSecureString`. Valid existing stores are retained by default; only missing
+stores prompt. Unreadable existing stores fail closed. Setup never reuses a
+single process env key for both purposes. The old singular BAT is a compatibility
+wrapper to this plural setup only.
 
-Both controllers load the helper from
-`D:\Engineering_Bridge_System\control\SecureMcpRuntimeKey.ps1` and share
-`D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-runtime-api-key.dpapi`.
-The store is local-only, encrypted with Windows DPAPI CurrentUser, written via
-same-directory atomic rename/replace, and best-effort ACL restricted to the
-current user, SYSTEM and Administrators. ACL hardening failure emits only a
-bounded warning and does not invalidate successful DPAPI encryption. Other
-Windows accounts cannot use the store; seed it as the actual controller user.
-Managed plaintext strings cannot be guaranteed immediately erased by the CLR;
-they are transient only, and byte/BSTR buffers are explicitly cleared.
+For independent setup/check use `-Purpose DevSpace`, `-Purpose Bridge`, or
+`-Purpose All`; `-Check` reports availability only. Deliberate rotation or repair
+requires `-Purpose DevSpace -Force` or `-Purpose Bridge -Force` and a secure prompt.
+`-Force` cannot combine with `-Check` or `-IfMissing`. No key is a command argument.
 
-`SetSecureMcpRuntimeKey.ps1 -Check` reports availability only and never displays
-the key. For deliberate rotation use the setter without `-IfMissing`; an
-unreadable existing store is never silently replaced by the one-time BAT.
+Both controllers load generic `SecureMcpRuntimeKey.ps1` from central control.
+The path selector requires a purpose; save/load/check/resolve require an explicit
+SecretPath, with no ambiguous fallback. DevSpace resolves only its own store;
+Bridge resolves only its own store. Normal Start uses deliberately supplied
+process `CONTROL_PLANE_API_KEY` first, otherwise its own DPAPI store, otherwise
+bounded setup failure. Explicit empty env input fails closed.
+
+Stores are local-only, encrypted with Windows DPAPI CurrentUser, written via
+same-directory atomic rename/replace with best-effort ACL for current user,
+SYSTEM and Administrators. Plaintext stays transient in process env/memory;
+byte/BSTR buffers are cleared. No plaintext goes into BAT/Git/YAML/log/manifest
+or command line. No secret extraction from process memory is permitted.
+
+Current deployed shared-store controllers are untouched by this candidate.
+The obsolete shared store is unseeded and must not be used. Deploy and seed the
+split design only after Owner I/W; see
+`docs/HANDOFF_SECURE_MCP_SPLIT_DPAPI_KEYS_20261007.md` for deployment and fresh
+session resume. Live cold lifecycle and Green/Blue acceptance remain UNVERIFIED.
+
 After deployment and seeding, total stop/start/restart no longer prompts after one-time setup.
 Missing/unreadable credentials fail with setup instructions; normal Start never
 prompts or persists plaintext. Profiles remain env-only. Tunnel-client inherits
@@ -153,7 +169,7 @@ healthy startup look like an error even though readiness had passed.
 - The critical deployed BAT surface is tracked here as canonical recovery/startup source: `START_ALL_CHANNELS.bat`, `STOP_ALL_CHANNELS.bat`, `RESTART_ALL_CHANNELS.bat`, `START_DS_CHANNEL.bat`, `STOP_DS_CHANNEL.bat`, `START_BRIDGE_CHANNEL.bat`, `START_Secure_MCP_Bridge.bat`, `STOP_Secure_MCP_Bridge.bat`, `STATUS_Secure_MCP_Bridge.bat`, `ROLLBACK_Secure_MCP_Bridge.bat`, `CHECK_CHANNELS.bat`, and `START_RECOVERY_WATCHDOG.bat`.
 - `START_DS_BLUE_CHANNEL.bat` owns the legacy Blue/Cloudflared checks. `START_DS_CHANNEL.bat` composes Blue readiness with idempotent Secure MCP Green startup and returns success only when both lanes are safe.
 - `START_BRIDGE_CHANNEL.bat` remains the Blue-only Bridge launcher. Once Bridge public auth is provisioned, it fails closed if the dedicated Cloudflare runner/token is missing and requires both the local OAuth metadata endpoint and public OAuth metadata endpoint to be healthy before returning success.
-- `START_ALL_CHANNELS.bat` delegates Bridge startup to `START_ENGINEERING_BRIDGE_ALL.bat`, which starts/adopts Blue first, then starts/adopts Secure MCP Green and verifies Green status. If Green must launch, the Runtime API key is resolved from process env or the shared DPAPI store without prompting. A Green startup failure leaves Blue untouched.
+- `START_ALL_CHANNELS.bat` delegates Bridge startup to `START_ENGINEERING_BRIDGE_ALL.bat`, which starts/adopts Blue first, then starts/adopts Secure MCP Green and verifies Green status. If Green must launch, the Runtime API key is resolved from process env or the Bridge-specific DPAPI store without prompting. A Green startup failure leaves Blue untouched.
 - `STOP_ALL_CHANNELS.bat` stops Bridge Green before the legacy Bridge Blue lane. `RESTART_ALL_CHANNELS.bat` therefore performs a full stack restart without recurring key entry after one-time setup.
 - `CHECK_CHANNELS.bat` validates DevSpace Secure MCP, Bridge Secure MCP Green, Bridge Blue rollback, Bridge local/public OAuth, Bridge tunnel ownership, and the separate Engineering Recovery Watchdog. This Recovery Watchdog remains a required health component.
 - `START_RECOVERY_WATCHDOG.bat` verifies that the PID file resolves to the expected watchdog process instead of treating PID-file creation alone as readiness.

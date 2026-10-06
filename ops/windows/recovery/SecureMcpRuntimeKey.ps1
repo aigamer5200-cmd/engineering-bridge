@@ -1,11 +1,20 @@
-# Shared local-only credential store. Never emit secret-bearing diagnostics.
+# Generic local-only credential helper; callers must select a purpose/path. Never emit secret-bearing diagnostics.
 function Get-SecureMcpRuntimeKeyPath {
-    return 'D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-runtime-api-key.dpapi'
+    param([Parameter(Mandatory)][ValidateSet('DevSpace', 'Bridge')][string]$Purpose)
+    switch ($Purpose) {
+        'DevSpace' { return 'D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-devspace-runtime-api-key.dpapi' }
+        'Bridge' { return 'D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-bridge-runtime-api-key.dpapi' }
+    }
 }
 
 function Assert-SecureMcpKeyPath([string]$SecretPath) {
     if ($env:OS -ne 'Windows_NT' -or $SecretPath -notmatch '^[A-Za-z]:\\') {
         throw 'Runtime key store requires a local Windows drive path.'
+    }
+    # Reserve the secure-mcp namespace for the two unambiguous canonical stores.
+    $storeName = [IO.Path]::GetFileName($SecretPath)
+    if ($storeName -like 'secure-mcp-*' -and $storeName -notmatch '^secure-mcp-(devspace|bridge)-runtime-api-key\.dpapi$') {
+        throw 'Ambiguous legacy store is obsolete and forbidden; select DevSpace or Bridge.'
     }
     Add-Type -AssemblyName System.Security -ErrorAction Stop
 }
@@ -33,7 +42,7 @@ function Set-SecureMcpKeyAcl([string]$Path, [bool]$Directory = $false) {
 
 function Save-SecureMcpRuntimeKey {
     param([Parameter(Mandatory)][Security.SecureString]$Secret,
-          [string]$SecretPath = (Get-SecureMcpRuntimeKeyPath))
+          [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SecretPath)
     $buffer = $null
     $bstr = [IntPtr]::Zero
     $temporary = $null
@@ -67,7 +76,7 @@ function Save-SecureMcpRuntimeKey {
 }
 
 function Load-SecureMcpRuntimeKey {
-    param([string]$SecretPath = (Get-SecureMcpRuntimeKeyPath))
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SecretPath)
     $buffer = $null
     try {
         Assert-SecureMcpKeyPath $SecretPath
@@ -78,7 +87,7 @@ function Load-SecureMcpRuntimeKey {
         if ([string]::IsNullOrWhiteSpace($value)) { throw 'Empty credential.' }
         return $value
     } catch {
-        throw 'Runtime API key store unavailable for this Windows user. Run SET_Secure_MCP_Runtime_API_Key.bat once as the controller user.'
+        throw 'Runtime API key store unavailable for this Windows user. Run SET_Secure_MCP_Runtime_API_Keys.bat once as the controller user.'
     } finally {
         $value = $null
         if ($null -ne $buffer) { [Array]::Clear($buffer, 0, $buffer.Length) }
@@ -86,13 +95,13 @@ function Load-SecureMcpRuntimeKey {
 }
 
 function Test-SecureMcpRuntimeKey {
-    param([string]$SecretPath = (Get-SecureMcpRuntimeKeyPath))
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SecretPath)
     try { return $null -ne (Load-SecureMcpRuntimeKey -SecretPath $SecretPath) }
     catch { return $false }
 }
 
 function Resolve-SecureMcpRuntimeKey {
-    param([string]$SecretPath = (Get-SecureMcpRuntimeKeyPath))
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SecretPath)
     $explicitKey = [Environment]::GetEnvironmentVariable('CONTROL_PLANE_API_KEY', 'Process')
     if ($null -ne $explicitKey) {
         if ([string]::IsNullOrWhiteSpace($explicitKey)) { throw 'Explicit CONTROL_PLANE_API_KEY is empty.' }
@@ -100,5 +109,5 @@ function Resolve-SecureMcpRuntimeKey {
     }
     $storedKey = Load-SecureMcpRuntimeKey -SecretPath $SecretPath
     if ($null -ne $storedKey) { return $storedKey }
-    throw 'Runtime API key missing. Run SET_Secure_MCP_Runtime_API_Key.bat once as the controller user; normal Start never prompts.'
+    throw 'Runtime API key missing. Run SET_Secure_MCP_Runtime_API_Keys.bat once as the controller user; normal Start never prompts.'
 }

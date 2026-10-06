@@ -203,10 +203,10 @@ function Start-Green {
 
         $keyHelper = "D:\Engineering_Bridge_System\control\SecureMcpRuntimeKey.ps1"
         if (-not (Test-Path -LiteralPath $keyHelper -PathType Leaf)) {
-            throw "Runtime key helper missing. Deploy SecureMcpRuntimeKey.ps1 and run SET_Secure_MCP_Runtime_API_Key.bat once."
+            throw "Runtime key helper missing. Deploy SecureMcpRuntimeKey.ps1 and run SET_Secure_MCP_Runtime_API_Keys.bat once."
         }
         . $keyHelper
-        $runtimeKey = Resolve-SecureMcpRuntimeKey
+        $runtimeKey = Resolve-SecureMcpRuntimeKey -SecretPath (Get-SecureMcpRuntimeKeyPath -Purpose Bridge)
 
         $oldKey = $env:CONTROL_PLANE_API_KEY
         try {

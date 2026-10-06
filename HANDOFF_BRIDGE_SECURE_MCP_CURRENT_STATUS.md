@@ -103,7 +103,7 @@ last-known-good recovery path.
 The separate upstream Engineering Bridge v1.5.0 audit/upgrade is not part of this
 integration and must be handled as a new bounded phase after this state is closed.
 
-## 2026-10-07 source-only DPAPI candidate (not production acceptance)
+## Historical shared DPAPI candidate (obsolete; superseded by split keys)
 
 Branch: `feature/secure-mcp-dpapi-runtime-key-20261007`; base checkpoint:
 `910c27c5c3d6b1048e71b9e5a54c3599cf011ad6`. Changes are uncommitted/unpushed.
@@ -120,3 +120,22 @@ store remain untouched. Owner I/W and live lifecycle validation are pending.
 See `docs/HANDOFF_SECURE_MCP_DPAPI_RUNTIME_KEY_20261007.md` for changed files,
 tests and exact deployment/resume steps. A fresh account-bound session can
 resume from that durable HANDOFF and branch without the prior native thread.
+
+## Current 2026-10-07 split DPAPI source candidate
+
+Branch `feature/secure-mcp-split-dpapi-keys-20261007`; base
+`4c072dd4699dd8af09c83c1716276649a59dd574`. Changes remain uncommitted/unpushed;
+no new checkpoint exists and no I/W/deployed-file mutation occurred.
+DevSpace and Bridge now require two distinct keys and two distinct stores.
+Both normal Starts remain non-interactive and use their own DPAPI store after
+explicit process env. The plural setup preserves valid stores and prompts only
+for missing purposes by default. Current production/deployed shared-store
+controllers are untouched; the obsolete shared store is unseeded and must not
+be used. Runtime `1.4.2-biaogu.16`, tunnel IDs, routing, GOAL, Cloudflare Blue and
+Recovery Blue-only boundary are unchanged. No secret extraction from process
+memory. Live cold stop/start/restart and both Green/Blue health remain UNVERIFIED.
+
+Fresh account-bound sessions resume from
+`docs/HANDOFF_SECURE_MCP_SPLIT_DPAPI_KEYS_20261007.md` plus repo state without
+the prior native thread. Next task is supervisor review of the source diff and
+validation, then separately authorized checkpoint/Owner I/W/deployment.

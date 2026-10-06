@@ -1,9 +1,5 @@
 @echo off
 setlocal EnableExtensions
-set "SCRIPT=D:\Engineering_Bridge_System\control\SetSecureMcpRuntimeKey.ps1"
-if not exist "%SCRIPT%" (
-  echo [FAIL] Deploy the shared Runtime API key setup helper first.
-  exit /b 90
-)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -IfMissing
+echo [INFO] Compatibility entry: setup now uses separate DevSpace and Bridge keys/stores.
+call "%~dp0SET_Secure_MCP_Runtime_API_Keys.bat"
 exit /b %ERRORLEVEL%

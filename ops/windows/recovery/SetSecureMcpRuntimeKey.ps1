@@ -1,38 +1,44 @@
 param(
+    [ValidateSet('DevSpace', 'Bridge', 'All')][string]$Purpose = 'All',
     [switch]$Check,
+    [switch]$Force,
     [switch]$IfMissing,
-    [string]$SecretPath = 'D:\Engineering_Bridge_System\runtime\secrets\secure-mcp-runtime-api-key.dpapi'
+    # Explicit single-purpose override for isolated tests/local tooling only.
+    [string]$SecretPath
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$secure = $null
 try {
     . (Join-Path $PSScriptRoot 'SecureMcpRuntimeKey.ps1')
-    if ($Check) {
-        if (Test-SecureMcpRuntimeKey -SecretPath $SecretPath) {
-            Write-Host 'Runtime API key store: AVAILABLE for current Windows user.'
-            exit 0
+    if ($SecretPath -and $Purpose -eq 'All') { throw 'Explicit path requires a single purpose.' }
+    if ($Force -and ($Check -or $IfMissing)) { throw 'Force cannot combine with Check/IfMissing.' }
+    $purposes = if ($Purpose -eq 'All') { @('DevSpace', 'Bridge') } else { @($Purpose) }
+    $unavailable = $false
+    foreach ($selected in $purposes) {
+        $path = if ($SecretPath) { $SecretPath } else { Get-SecureMcpRuntimeKeyPath -Purpose $selected }
+        Assert-SecureMcpKeyPath $path
+        $valid = Test-SecureMcpRuntimeKey -SecretPath $path
+        if ($Check) {
+            if ($valid) { Write-Host "$selected Runtime API key store: AVAILABLE for current Windows user." }
+            else { Write-Host "$selected Runtime API key store: MISSING/UNAVAILABLE. Run SET_Secure_MCP_Runtime_API_Keys.bat once."; $unavailable = $true }
+            continue
         }
-        Write-Host 'Runtime API key store: MISSING/UNAVAILABLE. Run SET_Secure_MCP_Runtime_API_Key.bat once.'
-        exit 1
+        if (-not $Force -and (Test-Path -LiteralPath $path)) {
+            if (-not $valid) { throw 'Existing store unavailable; explicit Force rotation required.' }
+            Write-Host "$selected existing encrypted store retained."
+            continue
+        }
+        # Never reuse CONTROL_PLANE_API_KEY across purposes during setup.
+        $secure = Read-Host "Enter $selected Runtime API Key (one-time secure setup)" -AsSecureString
+        Save-SecureMcpRuntimeKey -Secret $secure -SecretPath $path
+        $secure.Dispose(); $secure = $null
+        Write-Host "$selected Runtime API key saved encrypted with Windows DPAPI CurrentUser. Normal Start will not prompt."
     }
-    if ($IfMissing -and (Test-Path -LiteralPath $SecretPath)) {
-        if (-not (Test-SecureMcpRuntimeKey -SecretPath $SecretPath)) { throw 'Existing store unavailable; no overwrite attempted.' }
-        Write-Host 'Existing encrypted store retained.'
-        exit 0
-    }
-    $explicitKey = [Environment]::GetEnvironmentVariable('CONTROL_PLANE_API_KEY', 'Process')
-    $secure = if ($null -ne $explicitKey) {
-        if ([string]::IsNullOrWhiteSpace($explicitKey)) { throw 'Explicit runtime key is empty.' }
-        ConvertTo-SecureString -String $explicitKey -AsPlainText -Force
-    } else {
-        Read-Host 'Enter Runtime API Key (one-time secure setup)' -AsSecureString
-    }
-    Save-SecureMcpRuntimeKey -Secret $secure -SecretPath $SecretPath
-    Write-Host 'Runtime API key saved encrypted with Windows DPAPI CurrentUser. Normal Start will not prompt.'
+    if ($unavailable) { exit 1 }
 } catch {
-    Write-Host 'Runtime API key setup failed. Check local store access and run as the controller Windows user.'
+    Write-Host 'Runtime API key setup failed. Check controller Windows user/store access; unreadable existing stores require explicit -Purpose DevSpace or Bridge -Force rotation.'
     exit 1
 } finally {
-    $explicitKey = $null
-    if ($null -ne (Get-Variable secure -ErrorAction SilentlyContinue) -and $null -ne $secure) { $secure.Dispose() }
+    if ($null -ne $secure) { $secure.Dispose() }
 }

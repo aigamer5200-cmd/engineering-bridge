@@ -253,10 +253,10 @@ function Start-Green {
         if ($version -notmatch "0\.0\.15") { throw "Unexpected tunnel-client version: $version" }
         $keyHelper = "D:\Engineering_Bridge_System\control\SecureMcpRuntimeKey.ps1"
         if (-not (Test-Path -LiteralPath $keyHelper -PathType Leaf)) {
-            throw "Runtime key helper missing. Deploy SecureMcpRuntimeKey.ps1 and run SET_Secure_MCP_Runtime_API_Key.bat once."
+            throw "Runtime key helper missing. Deploy SecureMcpRuntimeKey.ps1 and run SET_Secure_MCP_Runtime_API_Keys.bat once."
         }
         . $keyHelper
-        $runtimeKey = Resolve-SecureMcpRuntimeKey
+        $runtimeKey = Resolve-SecureMcpRuntimeKey -SecretPath (Get-SecureMcpRuntimeKeyPath -Purpose DevSpace)
 
         $stdout = Join-Path $logsRoot "green-production-tunnel.stdout.log"
         $stderr = Join-Path $logsRoot "green-production-tunnel.stderr.log"

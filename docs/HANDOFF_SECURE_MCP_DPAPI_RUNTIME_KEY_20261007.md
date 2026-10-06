@@ -1,3 +1,9 @@
+> OBSOLETE historical shared-store design/deployment record. Do not follow the
+> setup/seeding instructions below. The shared old store is unseeded and must
+> not be used. Current source authority is
+> [split-key HANDOFF](HANDOFF_SECURE_MCP_SPLIT_DPAPI_KEYS_20261007.md).
+> Historical deployed shared-store controllers remain untouched in that candidate.
+
 # Secure MCP shared DPAPI Runtime API key — source candidate
 
 Updated: 2026-10-07. Worktree:
