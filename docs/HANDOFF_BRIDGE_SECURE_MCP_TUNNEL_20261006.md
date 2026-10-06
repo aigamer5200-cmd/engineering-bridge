@@ -124,6 +124,17 @@ owner shape (while retaining direct `mcp-stdio.exe` compatibility), and also
 requires an actual HTTP response from `http://127.0.0.1:8768/mcp`. Re-validation
 reports Blue READY while Green remains stopped, as expected.
 
+The first real Green startup then exposed a Windows command-tokenization defect
+after doctor had already returned `RESULT ok`: the YAML double-quoted command
+correctly contained escaped backslashes, but the tunnel-client STDIO command
+parser treated the resulting Windows backslashes as escape characters and tried
+to execute `D:Engineering_Bridge_SystemruntimeRUN_ENGINEERING_BRIDGE_STDIO.bat`.
+The underlying BAT itself is healthy. A bounded local smoke proved that
+`cmd.exe /d /c D:/Engineering_Bridge_System/runtime/RUN_ENGINEERING_BRIDGE_STDIO.bat`
+starts correctly, so setup now normalizes only the command-line copy of the
+Bridge runner path to forward slashes. The canonical filesystem path and
+Bridge -> Codex transport are otherwise unchanged.
+
 ## Blue rollback live verification
 
 Blue was not stopped or reconfigured.

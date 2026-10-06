@@ -20,7 +20,8 @@ $client = Join-Path $clientDir "tunnel-client.exe"
 $profilePath = Join-Path $env:APPDATA "tunnel-client\$Profile.yaml"
 $setupManifest = Join-Path $runtimeDir "secure-mcp-bridge-setup.json"
 $resourceUrl = "https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/$TunnelId"
-$mcpCommand = "cmd.exe /d /c $BridgeRunner"
+$bridgeRunnerCommand = $BridgeRunner -replace '\\','/'
+$mcpCommand = "cmd.exe /d /c $bridgeRunnerCommand"
 
 foreach ($path in @($Root, $clientDir, $runtimeDir, $logsDir)) {
     New-Item -ItemType Directory -Force -Path $path | Out-Null
@@ -56,7 +57,7 @@ if ($profileRaw -notmatch [regex]::Escape("127.0.0.1:$TunnelHealthPort")) {
 }
 if (
     $profileRaw -notmatch [regex]::Escape("cmd.exe /d /c") -or
-    $profileRaw -notmatch [regex]::Escape("RUN_ENGINEERING_BRIDGE_STDIO.bat")
+    $profileRaw -notmatch [regex]::Escape("D:/Engineering_Bridge_System/runtime/RUN_ENGINEERING_BRIDGE_STDIO.bat")
 ) {
     throw "Generated profile does not contain expected Bridge STDIO command."
 }
