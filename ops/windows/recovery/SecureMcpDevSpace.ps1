@@ -26,6 +26,7 @@ $dbPath = Join-Path $stateRoot "devspace.sqlite"
 $cliPath = Join-Path $sourceRoot "bin\devspace.js"
 $runtimeManifest = Join-Path $runtimeRoot "secure-mcp-runtime.json"
 $blueManifestPath = "D:\Engineering_Bridge_System\DevSpace\runtime\painless-upgrade\runtime_production.json"
+$proxyJsCanonical = Join-Path $PSScriptRoot "devspace_development_guard_proxy.mjs"
 $proxyJs = "D:\Engineering_Bridge_System\DevSpace\devspace_development_guard_proxy.mjs"
 $guardPython = "D:\shoestring-goal\.venv\Scripts\python.exe"
 $guardScript = "D:\shoestring-goal\scripts\development_execution_guard.py"
@@ -36,6 +37,21 @@ $tunnelProfile = Join-Path $env:APPDATA "tunnel-client\$Profile.yaml"
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     $enc = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($Path, $Text, $enc)
+}
+
+function Sync-GuardProxySource {
+    if (-not (Test-Path -LiteralPath $proxyJsCanonical -PathType Leaf)) {
+        throw "Missing canonical DevSpace guard proxy: $proxyJsCanonical"
+    }
+    $canonicalHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $proxyJsCanonical).Hash
+    $deployedHash = if (Test-Path -LiteralPath $proxyJs -PathType Leaf) {
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $proxyJs).Hash
+    } else {
+        $null
+    }
+    if ($canonicalHash -ne $deployedHash) {
+        Copy-Item -LiteralPath $proxyJsCanonical -Destination $proxyJs -Force
+    }
 }
 
 function Get-Listener([int]$Port) {
@@ -104,7 +120,7 @@ function Assert-Files {
     foreach ($path in @($sourceRoot,$configRoot,$stateRoot,$runtimeRoot,$logsRoot)) {
         if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw "Missing directory: $path" }
     }
-    foreach ($path in @($configPath,$authPath,$dbPath,$cliPath,$proxyJs,$guardPython,$guardScript,$tunnelClient,$tunnelProfile)) {
+    foreach ($path in @($configPath,$authPath,$dbPath,$cliPath,$proxyJsCanonical,$proxyJs,$guardPython,$guardScript,$tunnelClient,$tunnelProfile)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $path" }
     }
 }
@@ -174,6 +190,7 @@ function Save-RuntimeManifest($Blue, $Green) {
 }
 
 function Start-Green {
+    Sync-GuardProxySource
     Assert-Files
     Assert-Config
     $blue = Assert-Blue

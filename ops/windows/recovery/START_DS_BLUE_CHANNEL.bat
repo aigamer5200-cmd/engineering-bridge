@@ -2,8 +2,14 @@
 setlocal EnableExtensions
 set "DS_START=D:\Engineering_Bridge_System\DevSpace\START_DS.bat"
 set "MAINTENANCE_FLAG=D:\Engineering_Bridge_System\runtime\maintenance-devspace.flag"
+set "GUARD_CANONICAL=D:\Engineering_Bridge_System\engineering-bridge\ops\windows\recovery\devspace_development_guard_proxy.mjs"
+set "GUARD_DEPLOYED=D:\Engineering_Bridge_System\DevSpace\devspace_development_guard_proxy.mjs"
 
 if not exist "%DS_START%" exit /b 10
+if not exist "%GUARD_CANONICAL%" exit /b 14
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$a=(Get-FileHash -Algorithm SHA256 -LiteralPath '%GUARD_CANONICAL%').Hash; $b=if(Test-Path -LiteralPath '%GUARD_DEPLOYED%'){(Get-FileHash -Algorithm SHA256 -LiteralPath '%GUARD_DEPLOYED%').Hash}else{$null}; if($a -ne $b){Copy-Item -LiteralPath '%GUARD_CANONICAL%' -Destination '%GUARD_DEPLOYED%' -Force}"
+if errorlevel 1 exit /b 15
 
 del /q "%MAINTENANCE_FLAG%" >nul 2>&1
 

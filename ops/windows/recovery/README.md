@@ -34,6 +34,8 @@ healthy startup look like an error even though readiness had passed.
 
 - The legacy watchdog checks Blue DevSpace on port `7677` and Engineering Bridge on `8768` every 15 seconds. It is not the Secure MCP Green health authority.
 - Blue port `7677` may be owned either by the legacy direct `@waishnav/devspace` CLI process or by the guarded `devspace_development_guard_proxy.mjs`; any other Blue listener still fails closed. Green has its own strict 7688/7689/tunnel-client owner checks.
+- `devspace_development_guard_proxy.mjs` is Git-tracked here as the canonical source and synchronized to `D:\\Engineering_Bridge_System\\DevSpace` before Blue/Green startup. Unknown workspace IDs must match the normal `ws_...` identifier shape before they may be used as unresolved-workspace directory names. Invalid IDs return a guard failure and are caught inside the heartbeat path; they must never terminate the proxy process.
+- `TEST_DevSpace_Guard_Invalid_Workspace.ps1` is the live regression for that boundary: the malformed request must be rejected with HTTP 503 while the Guard PID remains unchanged.
 - Health requires the expected listener owners plus real local HTTP/readiness responses. Bridge public tunnel health is checked independently through the dedicated `20242` cloudflared metrics listener when public auth is enabled.
 - Three consecutive repairable failures are required before automatic recovery.
 - Unexpected processes owning a managed port are fail-closed: Recovery logs the condition and does not kill the process.
