@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern("^tunnel_[A-Za-z0-9]+$")]
+    [ValidatePattern("^tunnel_[a-z0-9]{32}$")]
     [string]$TunnelId,
     [string]$Root = "D:\Engineering_Bridge_System\BridgeSecureTunnel",
     [string]$Profile = "engineering-bridge",

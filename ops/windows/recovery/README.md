@@ -45,7 +45,9 @@ The one account-scoped prerequisite is a dedicated remote Tunnel ID created in
 OpenAI Tunnels management (or by tunnel-client admin tunnels create with a
 separate admin key). Once that ID exists,
 SETUP_Secure_MCP_Bridge.bat <tunnel_id> materializes the local STDIO profile
-and prints the Connector resource URL. Do not reuse the DevSpace Tunnel ID.
+and prints the Connector resource URL. The ID must match the tunnel-client
+format `tunnel_` plus exactly 32 lowercase alphanumeric characters. Do not reuse
+the DevSpace Tunnel ID.
 
 ### DevSpace ingress: Secure MCP Green + Cloudflare Blue rollback
 
