@@ -80,17 +80,63 @@ Under `D:\Engineering_Bridge_System\control`:
 - `START_ALL_CHANNELS.bat` — starts/adopts DevSpace, Bridge Blue, Bridge Green,
   then Recovery Watchdog and validates all channels.
 - `CHECK_CHANNELS.bat` — requires both Bridge Green and Blue to be healthy.
-- `START_Secure_MCP_Bridge.bat` — starts/adopts Green; prompts locally for the
-  Runtime API key only when launch is required.
+- `START_Secure_MCP_Bridge.bat` — starts/adopts Green and resolves the
+  Bridge-specific Runtime API key from its independent DPAPI CurrentUser store.
 - `STOP_Secure_MCP_Bridge.bat` — stops Green only and verifies Blue remains ready.
 - `ROLLBACK_Secure_MCP_Bridge.bat` — explicit Green -> Blue rollback.
 - `STATUS_Secure_MCP_Bridge.bat` — reports Green + Blue health.
 - `STOP_ALL_CHANNELS.bat` / `RESTART_ALL_CHANNELS.bat` — full interactive stack
-  lifecycle; restart may require local Runtime API key input.
+  lifecycle; normal start/restart is non-interactive after the split DPAPI stores
+  have been seeded.
 
 `START_BRIDGE_CHANNEL.bat` and `RESTART_BRIDGE_CHANNEL.bat` remain Blue-only by
 design because the unattended Recovery Watchdog must never wait for interactive
 secret input.
+
+## 2026-10-07 restart race hardening / Owner status hold
+
+Observed production behavior:
+
+- A direct `02_總重啟_開發雙通道.bat` could leave the fresh ChatGPT MCP
+  connectors unavailable even though local STOP/START logic returned.
+- A manual `01_總關閉_開發雙通道.bat` followed later by
+  `00_總啟動_開發雙通道.bat` restored all local channel health.
+- After that manual stop/start, the real deployed `CHECK_CHANNELS.bat`
+  returned exit 0 with DevSpace Blue/Green, Bridge Blue/Green, public OAuth,
+  Cloudflare metrics and Recovery Watchdog all READY.
+
+Bounded repair:
+
+- `RESTART_ALL_CHANNELS.bat` no longer uses a fixed two-second STOP -> START
+  delay.
+- New `WAIT_ALL_CHANNELS_STOPPED.ps1` requires the managed ports
+  `7677/7679/7688/7689/8768/18080/18081/20242`, the targeted DevSpace /
+  Bridge tunnel and gateway processes, and the Recovery Watchdog to be gone;
+  the DevSpace Cloudflared service must also be stopped.
+- That zero-runtime state must remain stable for eight seconds before START is
+  allowed. Restart then waits five seconds and runs a second
+  `CHECK_CHANNELS.bat` verification before reporting PASS.
+- The deployed root Owner entry
+  `90_檢查_全部通道狀態.bat` now preserves the health-check exit code, prints a
+  final PASS/FAIL line, and pauses for Owner input so a double-clicked status
+  window does not immediately close.
+
+Validation completed without intentionally cycling the live stack:
+
+- Both source and deployed `WAIT_ALL_CHANNELS_STOPPED.ps1` parse cleanly.
+- With the stack intentionally still running, the new stop gate correctly
+  failed closed and enumerated all active managed listeners/processes instead
+  of allowing a premature restart.
+- The deployed root `90_檢查_全部通道狀態.bat` completed the real health check
+  with exit 0 / all READY and reached its pause prompt.
+
+Pending acceptance:
+
+- One Owner-triggered live `02_總重啟_開發雙通道.bat` is still required to
+  prove STOP -> stable-zero -> START -> post-start health in the real external
+  connector lifecycle. Do not trigger that test from the supervising MCP
+  session because it intentionally tears down the transport being used to
+  supervise the test.
 
 ## Rollback rule
 
