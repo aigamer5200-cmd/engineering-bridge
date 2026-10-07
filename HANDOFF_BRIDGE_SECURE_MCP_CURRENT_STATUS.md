@@ -93,6 +93,61 @@ Under `D:\Engineering_Bridge_System\control`:
 design because the unattended Recovery Watchdog must never wait for interactive
 secret input.
 
+## FINAL ACCEPTED — 2026-10-07
+
+Canonical production runtime remains `1.4.2-biaogu.16`. Tunnel IDs, Cloudflare
+Blue, Secure MCP Green, Codex auth/profile and GOAL routing remain unchanged.
+
+Final Owner lifecycle policy:
+
+- `00_總啟動_開發雙通道.bat` is the canonical full-stack START entry.
+- `01_總關閉_開發雙通道.bat` is the canonical full-stack STOP entry.
+- When a restart is needed, use `01` -> allow the stack to stop -> `00`.
+- `02_總重啟_開發雙通道.bat` is retained as an Owner convenience file only.
+  It is **not** a production acceptance gate and is not required for normal
+  operation because live testing showed that an immediate one-shot restart can
+  leave external ChatGPT MCP connector sessions stale even when local health
+  reports READY.
+- `90_檢查_全部通道狀態.bat` is the canonical Owner status entry. It preserves
+  the health-check return code, prints PASS/FAIL, and waits for a keypress so a
+  double-clicked window does not immediately close.
+
+Final live acceptance evidence:
+
+- Owner performed `01` followed by `00`; no architecture/routing/auth change
+  was required.
+- Fresh ChatGPT MCP verification after that lifecycle:
+  - DevSpace Blue: AVAILABLE.
+  - DevSpace Secure MCP Green: AVAILABLE.
+  - Engineering Bridge Blue: AVAILABLE and bind succeeded.
+  - Engineering Bridge Secure MCP Green: AVAILABLE and bind succeeded.
+- Real deployed `90_檢查_全部通道狀態.bat` / `CHECK_CHANNELS.bat` completed
+  with exit 0 and reported DevSpace Blue/Green, Bridge Blue/Green, Bridge local
+  OAuth, Bridge public OAuth, dedicated Cloudflare metrics and Engineering
+  Recovery Watchdog READY. The root launcher reached its keypress hold.
+- Root `D:\Engineering_Bridge_System` contains exactly the six Owner BAT
+  entries:
+  `00_總啟動_開發雙通道.bat`,
+  `01_總關閉_開發雙通道.bat`,
+  `02_總重啟_開發雙通道.bat`,
+  `90_檢查_全部通道狀態.bat`,
+  `91_設定_Secure_MCP_Runtime_API_Keys.bat`,
+  `99_Engineering_Recovery.bat`.
+- Secure MCP Green -> Engineering Bridge -> official Codex app-server E2E
+  completed successfully with task output
+  `SECURE_MCP_BRIDGE_CODEX_E2E_OK`; the task was explicitly read-only.
+- Split DevSpace / Bridge DPAPI stores remain the canonical Runtime API key
+  source for normal non-interactive startup. No plaintext key persistence was
+  introduced.
+
+Disposition: **FINAL ACCEPTED** for the supported production lifecycle
+`01 STOP -> 00 START`, current four-lane MCP availability, Owner status surface,
+split-DPAPI startup and Secure MCP -> Bridge -> Codex E2E. The one-shot `02`
+restart convenience is explicitly outside the acceptance gate.
+
+Historical candidate/restart notes below are retained only as implementation
+history and are superseded by this FINAL ACCEPTED section wherever they conflict.
+
 ## 2026-10-07 restart race hardening / Owner status hold
 
 Functional checkpoint: `8a6c112` on `main` (pushed to `origin/main`).
@@ -132,13 +187,11 @@ Validation completed without intentionally cycling the live stack:
 - The deployed root `90_檢查_全部通道狀態.bat` completed the real health check
   with exit 0 / all READY and reached its pause prompt.
 
-Pending acceptance:
+Acceptance disposition:
 
-- One Owner-triggered live `02_總重啟_開發雙通道.bat` is still required to
-  prove STOP -> stable-zero -> START -> post-start health in the real external
-  connector lifecycle. Do not trigger that test from the supervising MCP
-  session because it intentionally tears down the transport being used to
-  supervise the test.
+- Live `02` testing demonstrated that one-shot restart is not a reliable
+  external connector lifecycle boundary. Per Owner decision it is therefore
+  non-gating and normal restart operation is the proven `01 -> 00` sequence.
 
 ## Rollback rule
 
