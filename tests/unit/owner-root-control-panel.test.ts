@@ -42,6 +42,16 @@ test("Blue launches hidden detached runners and retains identity/OAuth gates", (
   assert.doesNotMatch(helper, /ReadAllText|Get-Content|TOKEN_FILE|CONTROL_PLANE_API_KEY/u);
 });
 
+test("Recovery watchdog launches without a persistent console window", () => {
+  const start = read("START_RECOVERY_WATCHDOG.bat");
+  assert.doesNotMatch(start, /\bstart\s+"Engineering Recovery Watchdog"|\/min\b/iu);
+  assert.ok(start.includes("System.Diagnostics.ProcessStartInfo"));
+  assert.ok(start.includes("CreateNoWindow=$true"));
+  assert.ok(start.includes("ProcessWindowStyle]::Hidden"));
+  assert.ok(start.includes("engineering_recovery_watchdog.ps1"));
+  assert.ok(start.includes("recovery-watchdog.pid"));
+});
+
 const windows = process.platform === "win32";
 const powershell = (file: string, args: string[]) => spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(base, file), ...args], { encoding: "utf8", timeout: 30_000, windowsHide: true });
 
