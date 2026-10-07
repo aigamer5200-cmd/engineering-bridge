@@ -95,6 +95,8 @@ secret input.
 
 ## 2026-10-07 restart race hardening / Owner status hold
 
+Functional checkpoint: `8a6c112` on `main` (pushed to `origin/main`).
+
 Observed production behavior:
 
 - A direct `02_總重啟_開發雙通道.bat` could leave the fresh ChatGPT MCP
