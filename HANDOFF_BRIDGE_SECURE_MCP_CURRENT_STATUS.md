@@ -193,6 +193,21 @@ patch and therefore will remain until the next canonical `01 -> 00` lifecycle.
 Final live acceptance for this hotfix is: after `01` then `00`, all four MCP
 lanes remain AVAILABLE and no new residual Windows Terminal window remains.
 
+Live acceptance completed after Owner performed the canonical `01 -> 00`
+lifecycle:
+
+- DevSpace Blue: AVAILABLE;
+- DevSpace Secure MCP Green: AVAILABLE;
+- Engineering Bridge Blue: AVAILABLE / bind PASS;
+- Engineering Bridge Secure MCP Green: AVAILABLE / bind PASS;
+- deployed `90_檢查_全部通道狀態.bat`: exit 0 with all channels READY and
+  keypress hold reached;
+- development-guard watchdog remains running in the background as expected,
+  with no visible main-window title;
+- no `WindowsTerminal.exe` process remained after startup.
+
+Disposition: **NO-WINDOW HOTFIX FINAL ACCEPTED**.
+
 ## 2026-10-07 restart race hardening / Owner status hold
 
 Functional checkpoint: `8a6c112` on `main` (pushed to `origin/main`).
