@@ -6,9 +6,11 @@ set "LOG_DIR=D:\Engineering_Bridge_System\runtime\logs"
 set "MAINTENANCE_FLAG=D:\Engineering_Bridge_System\runtime\maintenance-bridge.flag"
 set "AUTH_READY=D:\Engineering_Bridge_System\runtime\PUBLIC_AUTH_READY.flag"
 set "TOKEN_FILE=D:\Engineering_Bridge_System\runtime\secrets\cloudflared-bridge-token.txt"
+set "HIDDEN_LAUNCHER=%~dp0StartHiddenBridgeRunner.ps1"
 set "PUBLIC_OAUTH=https://bridge.twmarketlab.com/.well-known/oauth-authorization-server"
 
 if not exist "%GATEWAY_RUNNER%" exit /b 20
+if not exist "%HIDDEN_LAUNCHER%" exit /b 29
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 
 del /q "%MAINTENANCE_FLAG%" >nul 2>&1
@@ -17,7 +19,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=Get-NetTCPConnection 
 set "PORT_RC=%ERRORLEVEL%"
 if "%PORT_RC%"=="2" exit /b 23
 if not "%PORT_RC%"=="0" (
-  start "Engineering Bridge Gateway" /min cmd /d /c "call ""%GATEWAY_RUNNER%"" >> ""%LOG_DIR%\bridge-gateway.log"" 2>&1"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HIDDEN_LAUNCHER%" -Runner "%GATEWAY_RUNNER%" -LogPath "%LOG_DIR%\bridge-gateway.log"
+  if errorlevel 1 exit /b 29
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; 1..40 | ForEach-Object { $c=Get-NetTCPConnection -State Listen -LocalPort 8768 -ErrorAction SilentlyContinue | Select-Object -First 1; if($c){ $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.OwningProcess) -ErrorAction SilentlyContinue; if($p -and ([string]$p.CommandLine -match 'mcp-stdio\.exe.*serve.*--port 8768')){$ok=$true; break} }; Start-Sleep -Milliseconds 500 }; if($ok){exit 0}else{exit 1}"
@@ -35,7 +38,8 @@ if exist "%AUTH_READY%" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=Get-NetTCPConnection -State Listen -LocalPort 20242 -ErrorAction SilentlyContinue | Select-Object -First 1; if(-not $c){exit 1}; $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.OwningProcess) -ErrorAction SilentlyContinue; if($p -and $p.Name -eq 'cloudflared.exe' -and ([string]$p.CommandLine -match '--metrics 127\.0\.0\.1:20242')){exit 0}else{exit 2}"
   if errorlevel 2 exit /b 24
   if errorlevel 1 (
-    start "Engineering Bridge Tunnel" /min cmd /d /c "call ""%TUNNEL_RUNNER%"" >nul 2>&1"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HIDDEN_LAUNCHER%" -Runner "%TUNNEL_RUNNER%"
+    if errorlevel 1 exit /b 30
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; 1..40 | ForEach-Object { $c=Get-NetTCPConnection -State Listen -LocalPort 20242 -ErrorAction SilentlyContinue | Select-Object -First 1; if($c){ $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.OwningProcess) -ErrorAction SilentlyContinue; if($p -and $p.Name -eq 'cloudflared.exe' -and ([string]$p.CommandLine -match '--metrics 127\.0\.0\.1:20242')){$ok=$true; break} }; Start-Sleep -Milliseconds 500 }; if($ok){exit 0}else{exit 1}"
     if errorlevel 1 exit /b 22
   )

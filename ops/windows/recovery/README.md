@@ -2,6 +2,59 @@
 
 This directory is the Git-tracked canonical source for the Windows recovery layer deployed under `D:\Engineering_Bridge_System\control`.
 
+## Owner root control panel (source candidate; pending Owner I/W)
+
+`operator-root/` is the canonical source for exactly six thin root wrappers:
+
+| Root filename | Internal target under `control` |
+| --- | --- |
+| `00_總啟動_開發雙通道.bat` | `START_ALL_CHANNELS.bat` |
+| `01_總關閉_開發雙通道.bat` | `STOP_ALL_CHANNELS.bat` |
+| `02_總重啟_開發雙通道.bat` | `RESTART_ALL_CHANNELS.bat` |
+| `90_檢查_全部通道狀態.bat` | `CHECK_CHANNELS.bat` |
+| `91_設定_Secure_MCP_Runtime_API_Keys.bat` | `SET_Secure_MCP_Runtime_API_Keys.bat` |
+| `99_Engineering_Recovery.bat` | `engineering_recovery_watchdog.ps1 -Once -ForceSessionRecovery` |
+
+Canonical controls stay in `control`; they must never be moved to root.
+The wrappers resolve `control` beside themselves and propagate the target exit
+code. BAT contents are ASCII with CRLF, so Chinese filenames do not require a
+console codepage change. The deployment PowerShell script uses UTF-8 with BOM
+for Windows PowerShell 5.1 filename handling.
+
+Only after separate Owner I/W authorization, first deploy the reviewed
+`START_BRIDGE_CHANNEL.bat` and `StartHiddenBridgeRunner.ps1` together into
+`control`, backing up their existing versions. Keep the deployment utility and
+its adjacent `operator-root` source directory outside the production root.
+Then invoke that utility from the approved checkout/staging directory:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ops\windows\recovery\DeployOwnerRootControlPanel.ps1 -SystemRoot D:\Engineering_Bridge_System -OwnerIWApproved
+```
+
+The utility verifies the six-file source set, rejects reparse destinations,
+backs up all direct root BAT files and the two obsolete root HANDOFF files to
+`runtime\painless-upgrade\owner-root-<timestamp>-<unique-id>`, verifies backup
+hashes before deleting, replaces the root BAT files, removes only those two
+root HANDOFFs, and verifies exact root BAT names and SHA-256 content. It never
+recurses into directories, modifies control, or changes runtime binaries. A
+failed replacement restores the pre-run root files; reruns create another
+backup and produce the same six wrappers. Retain the first backup to restore
+the original root UI. Historical/canonical repo HANDOFF documents remain intact.
+
+Blue Gateway and Tunnel now use the short `StartHiddenBridgeRunner.ps1`
+launcher, which detaches `cmd.exe` with `-WindowStyle Hidden` and does not wait
+for service descendants. Gateway append-log redirection and Tunnel null-output
+redirection are preserved, as are all listener/PID and local/public OAuth
+checks. Only runner/log paths enter the launcher command line; it does not read
+tokens or keys. Missing helper or launch failure fails closed. Recovery remains
+Blue-only and the total-stop DevSpace Green fix remains intact.
+
+Build/typecheck and focused tests validate the source and isolated Windows
+fixtures; deployed visibility and live cold lifecycle remain UNVERIFIED.
+See `docs/HANDOFF_OWNER_ROOT_CONTROL_PANEL_AND_HIDDEN_BLUE_20261007.md` for
+rollback and fresh-session resume. Current Bridge runtime remains
+`1.4.2-biaogu.16`; this candidate has not mutated production.
+
 The recovery layer deliberately lives outside the Engineering Bridge MCP process at runtime. That separation allows it to restart Bridge even when Bridge itself is down, and it keeps the nine-tool MCP surface unchanged.
 
 ## Runtime behavior
@@ -38,9 +91,10 @@ Canonical interactive Engineering Bridge dual-lane helpers:
 - `RESTART_ENGINEERING_BRIDGE_ALL.bat`
 
 Interactive Owner-facing Bridge controls use these dual-lane helpers to manage
-Green primary and Blue rollback as one unit. After Owner I/W, deploy the helpers
-to the control directory and point the root Owner-facing Bridge stop/restart BATs
-to them. START reads `D:\Engineering_Bridge_System\runtime\bridge-current-version.txt`
+Green primary and Blue rollback as one unit. Keep these helpers in control;
+the approved root total-start/stop/restart wrappers reach them through the
+canonical `START_ALL_CHANNELS`, `STOP_ALL_CHANNELS`, and `RESTART_ALL_CHANNELS`
+controls. START reads `D:\Engineering_Bridge_System\runtime\bridge-current-version.txt`
 at invocation, starts Blue before Green, and verifies Green status before READY.
 Green startup/status failure leaves Blue untouched. STOP stops Green first and
 aborts before stopping Blue if Green stop fails. RESTART stops both lanes, waits
@@ -193,7 +247,7 @@ The destructive test driver itself is not retained in the production control dir
 
 The local watchdog cannot independently know that a particular ChatGPT browser conversation has lost its connector/tool session while both local services remain healthy. There is no trustworthy local heartbeat from an idle browser conversation that distinguishes "session broken" from "user is not calling tools".
 
-For that branch, `06_Engineering_Recovery.bat` is the safe fallback. It performs a non-destructive health check, prepares the same handoff, opens a new ChatGPT window, and does not restart healthy DS/Bridge services.
+For that branch, the Owner root `99_Engineering_Recovery.bat` is the safe fallback after I/W. The canonical legacy `06_Engineering_Recovery.bat` stays internal; both invoke the same watchdog with `-Once -ForceSessionRecovery`. It performs a non-destructive health check, prepares the same handoff, opens a new ChatGPT window, and does not restart healthy DS/Bridge services.
 
 If a surviving tool channel can still execute local commands, it may invoke the same recovery script on behalf of the user. If the browser session cannot call any local tool at all, a browser extension/UI automation layer would be required for fully automatic detection; that is intentionally not a dependency of this production recovery layer.
 
