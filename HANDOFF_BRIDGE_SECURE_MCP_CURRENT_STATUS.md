@@ -148,6 +148,51 @@ restart convenience is explicitly outside the acceptance gate.
 Historical candidate/restart notes below are retained only as implementation
 history and are superseded by this FINAL ACCEPTED section wherever they conflict.
 
+## 2026-10-07 DevSpace Blue residual Windows Terminal hotfix
+
+After the FINAL ACCEPTED lifecycle, Owner reported that one Windows Terminal
+window still remained visible after `00_總啟動_開發雙通道.bat`.
+
+Live process inspection identified the visible terminal as the console inherited
+by the DevSpace Blue development-guard watchdog:
+
+- `D:\shoestring-goal\.venv\Scripts\python.exe`
+- `development_execution_guard.py ... watchdog --poll-seconds 5.0`
+
+Bridge Blue hidden runners, Bridge Green tunnel-client and the Engineering
+Recovery Watchdog were not the visible-window owner.
+
+Per the existing production-manager safety rule, the older manager was **not**
+copied over production. Only this minimal production patch was applied to:
+
+`D:\Engineering_Bridge_System\DevSpace\manage_devspace_painless_upgrade.py`
+
+The helper-only Windows creation flags changed from:
+
+`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
+
+to:
+
+`CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`
+
+This affects `start_detached_helper()`, which launches the development-guard
+watchdog/proxy. The normal DevSpace runtime launch path and its existing
+`DETACHED_PROCESS` behavior were left unchanged.
+
+Validation before cycling production:
+
+- manager `py_compile`: PASS;
+- helper flags: `0x08000200`;
+- isolated 4-second Python child smoke with the same flags created zero new
+  `WindowsTerminal.exe` processes;
+- patched production manager SHA256:
+  `9AC69F3C49046DBA8527DC7BC8036B6FABA5CD19B269AE4A2D58C3502A8924E2`.
+
+The currently visible terminal belongs to the watchdog started before this
+patch and therefore will remain until the next canonical `01 -> 00` lifecycle.
+Final live acceptance for this hotfix is: after `01` then `00`, all four MCP
+lanes remain AVAILABLE and no new residual Windows Terminal window remains.
+
 ## 2026-10-07 restart race hardening / Owner status hold
 
 Functional checkpoint: `8a6c112` on `main` (pushed to `origin/main`).
