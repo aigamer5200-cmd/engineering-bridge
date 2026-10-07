@@ -67,3 +67,16 @@ test("documentation keeps unattended recovery on its Blue-only adapter", () => {
   assert.ok(watchdog.includes('$RestartBridge = Join-Path $ControlRoot "RESTART_BRIDGE_CHANNEL.bat"'));
   assert.ok(!watchdog.includes("RESTART_ENGINEERING_BRIDGE_ALL.bat"));
 });
+
+test("master stop shuts down DevSpace Green before Blue", function () {
+  const stop = readControl("STOP_ALL_CHANNELS.bat");
+  assert.ok(stop.includes('set "DEVSPACE_SECURE_CONTROL=D:\\Engineering_Bridge_System\\DevSpace\\canary\\secure-tunnel-beta\\control"'));
+  const green = 'call "%DEVSPACE_SECURE_CONTROL%\\STOP_Secure_MCP_DevSpace.bat"';
+  const blue = call("STOP_DS_CHANNEL");
+  assert.ok(stop.indexOf(green) >= 0);
+  assert.ok(stop.indexOf(blue) > stop.indexOf(green));
+  assert.ok(stop.includes('set "DS_GREEN_RC=%ERRORLEVEL%"'));
+  assert.ok(stop.includes('set "DS_BLUE_RC=%ERRORLEVEL%"'));
+  assert.ok(stop.includes('if not "%DS_GREEN_RC%"=="0" exit /b %DS_GREEN_RC%'));
+  assert.ok(stop.includes('if not "%DS_BLUE_RC%"=="0" exit /b %DS_BLUE_RC%'));
+});
