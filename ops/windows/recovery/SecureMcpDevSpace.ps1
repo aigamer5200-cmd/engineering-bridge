@@ -33,6 +33,55 @@ $guardScript = "D:\shoestring-goal\scripts\development_execution_guard.py"
 $guardRuntime = "D:\ShoestringGoalData\development-execution-guard"
 $tunnelClient = Join-Path $Root "tunnel-client\v0.0.15\tunnel-client.exe"
 $tunnelProfile = Join-Path $env:APPDATA "tunnel-client\$Profile.yaml"
+$startupLog = Join-Path $logsRoot "green-startup-events.jsonl"
+$script:StartupCurrentStage = $null
+$script:StartupStageTimer = $null
+
+function Write-StartupEvent([string]$Stage, [string]$Status, [long]$ElapsedMs, [string]$Detail = "") {
+    # Only controlled, non-secret stage metadata belongs in this persistent log.
+    $entry = [ordered]@{
+        timestamp_utc = [DateTime]::UtcNow.ToString("o")
+        stage = $Stage
+        status = $Status
+        elapsed_ms = $ElapsedMs
+        detail = $Detail
+    }
+    try {
+        Add-Content -LiteralPath $startupLog -Value ($entry | ConvertTo-Json -Compress) -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        Write-Warning "Unable to write Green startup event log (stage=$Stage status=$Status)."
+    }
+    Write-Host ("[Green startup] {0}: {1} ({2} ms) {3}" -f $Stage,$Status,$ElapsedMs,$Detail)
+}
+
+function Start-StartupStage([string]$Stage) {
+    $script:StartupCurrentStage = $Stage
+    $script:StartupStageTimer = [Diagnostics.Stopwatch]::StartNew()
+    Write-StartupEvent -Stage $Stage -Status "STARTED" -ElapsedMs 0
+}
+
+function Complete-StartupStage([string]$Status, [string]$Detail = "") {
+    $script:StartupStageTimer.Stop()
+    Write-StartupEvent -Stage $script:StartupCurrentStage -Status $Status -ElapsedMs $script:StartupStageTimer.ElapsedMilliseconds -Detail $Detail
+    $script:StartupCurrentStage = $null
+    $script:StartupStageTimer = $null
+}
+
+function Fail-StartupStage([System.Exception]$ErrorObject) {
+    $stage = if ($script:StartupCurrentStage) { $script:StartupCurrentStage } else { "startup" }
+    $ms = if ($null -ne $script:StartupStageTimer) { $script:StartupStageTimer.ElapsedMilliseconds } else { 0 }
+    # Do not persist raw exception messages: key helpers and external programs may contain credentials.
+    $message = [string]$ErrorObject.Message
+    $reason = if ($message -match 'failed to listen|failed to expose health port') { "LISTENER_TIMEOUT_OR_FAILED" }
+        elseif ($message -match 'unexpected process|occupied by') { "UNEXPECTED_PORT_OWNER" }
+        elseif ($message -match 'Missing (directory|file)|not found|missing') { "MISSING_DEPENDENCY" }
+        elseif ($message -match 'runtime key|key helper|secret|decrypt') { "RUNTIME_KEY_ERROR" }
+        elseif ($message -match 'ready|probe|HTTP') { "READINESS_CHECK_FAILED" }
+        else { "EXCEPTION_" + $ErrorObject.GetType().Name }
+    Write-StartupEvent -Stage $stage -Status "FAILED" -ElapsedMs $ms -Detail $reason
+    $script:StartupCurrentStage = $null
+    $script:StartupStageTimer = $null
+}
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     $enc = New-Object System.Text.UTF8Encoding($false)
@@ -193,6 +242,7 @@ function Save-RuntimeManifest($Blue, $Green) {
 }
 
 function Start-Green {
+    Start-StartupStage -Stage "preflight"
     Sync-GuardProxySource
     Assert-Files
     Assert-Config
@@ -202,7 +252,10 @@ function Start-Green {
     if ($null -ne $green.Upstream -and -not $green.UpstreamOk) { throw "Green upstream port $GreenUpstreamPort is occupied by an unexpected process." }
     if ($null -ne $green.Proxy -and -not $green.ProxyOk) { throw "Green proxy port $GreenProxyPort is occupied by an unexpected process." }
     if ($null -ne $green.Tunnel -and -not $green.TunnelOk) { throw "Tunnel health port $TunnelHealthPort is occupied by an unexpected process." }
+    Complete-StartupStage -Status "READY" -Detail "Blue verified; Green ports verified"
 
+    Start-StartupStage -Stage "green_devspace"
+    $devspaceWasReady = $green.UpstreamOk
     if (-not $green.UpstreamOk) {
         $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
         if ($null -eq $nodeCommand) { throw "node not found in PATH." }
@@ -215,11 +268,14 @@ function Start-Green {
         } finally {
             if ($null -eq $oldConfig) { Remove-Item Env:\DEVSPACE_CONFIG_DIR -ErrorAction SilentlyContinue } else { $env:DEVSPACE_CONFIG_DIR = $oldConfig }
         }
-        $listener = Wait-ExpectedListener -Port $GreenUpstreamPort -ExpectedName "node.exe" -CommandPattern "secure-tunnel-beta\\source\\bin\\devspace\.js serve"
-        if ($null -eq $listener) { throw "Green DevSpace failed to listen on $GreenUpstreamPort. Inspect $stderr" }
+        $listener = Wait-ExpectedListener -Port $GreenUpstreamPort -ExpectedName "node.exe" -CommandPattern "secure-tunnel-beta\\source\\bin\\devspace\.js serve" -Seconds 120
+        if ($null -eq $listener) { throw "Green DevSpace failed to listen on $GreenUpstreamPort within 120 seconds. Inspect $stderr" }
     }
+    Complete-StartupStage -Status $(if ($devspaceWasReady) { "REUSED" } else { "READY" }) -Detail "port=$GreenUpstreamPort; timeout=120s"
 
+    Start-StartupStage -Stage "green_guard"
     $green = Get-GreenStatus
+    $guardWasReady = $green.ProxyOk
     if (-not $green.ProxyOk) {
         $stdout = Join-Path $logsRoot "green-production-guard.stdout.log"
         $stderr = Join-Path $logsRoot "green-production-guard.stderr.log"
@@ -246,8 +302,11 @@ function Start-Green {
         $listener = Wait-ExpectedListener -Port $GreenProxyPort -ExpectedName "node.exe" -CommandPattern "DevSpace\\devspace_development_guard_proxy\.mjs" -Seconds 30
         if ($null -eq $listener) { throw "Green Guard failed to listen on $GreenProxyPort. Inspect $stderr" }
     }
+    Complete-StartupStage -Status $(if ($guardWasReady) { "REUSED" } else { "READY" }) -Detail "port=$GreenProxyPort; timeout=30s"
 
+    Start-StartupStage -Stage "green_tunnel"
     $green = Get-GreenStatus
+    $tunnelWasReady = $green.TunnelOk
     if (-not $green.TunnelOk) {
         $version = (& $tunnelClient --version 2>&1 | Out-String).Trim()
         if ($version -notmatch "0\.0\.15") { throw "Unexpected tunnel-client version: $version" }
@@ -274,12 +333,15 @@ function Start-Green {
         $listener = Wait-ExpectedListener -Port $TunnelHealthPort -ExpectedName "tunnel-client.exe" -CommandPattern "run\s+--profile\s+$([regex]::Escape($Profile))"
         if ($null -eq $listener) { throw "tunnel-client failed to expose health port $TunnelHealthPort. Inspect $stderr" }
     }
+    Complete-StartupStage -Status $(if ($tunnelWasReady) { "REUSED" } else { "READY" }) -Detail "port=$TunnelHealthPort; timeout=45s"
 
+    Start-StartupStage -Stage "verification"
     $green = Get-GreenStatus
     if (-not $green.UpstreamOk -or -not $green.ProxyOk -or -not $green.TunnelOk -or -not $green.Readyz) { throw "Green Secure MCP runtime did not reach READY state." }
     if (-not (Test-HttpReachable "http://127.0.0.1:$GreenProxyPort/" 3)) { throw "Green Guard HTTP probe failed on $GreenProxyPort." }
 
     Save-RuntimeManifest -Blue $blue -Green $green
+    Complete-StartupStage -Status "READY" -Detail "Green readyz HTTP 200; Blue unchanged"
     Write-Host "Secure MCP DevSpace Green : READY"
     Write-Host "Blue rollback             : READY ($BlueProxyPort -> $BlueUpstreamPort)"
     Write-Host "Green runtime             : READY ($GreenProxyPort -> $GreenUpstreamPort)"
@@ -354,7 +416,14 @@ function Show-Status {
 }
 
 switch ($Action) {
-    "Start" { Start-Green; break }
+    "Start" {
+        try { Start-Green }
+        catch {
+            Fail-StartupStage -ErrorObject $_.Exception
+            throw
+        }
+        break
+    }
     "Stop" { Stop-Green; break }
     "Status" { Assert-Files; Assert-Config; Show-Status; break }
     "Rollback" {
