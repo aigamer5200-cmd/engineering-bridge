@@ -53,7 +53,8 @@ function taskResultContent(view: ReturnType<ThinCodexTaskService["taskView"]>) {
     ...(view.threadId === undefined ? {} : { thread_id: view.threadId }),
     ...(view.output === undefined ? {} : { output: view.output }),
     ...(view.partialOutput === undefined ? {} : { partial_output: view.partialOutput }),
-    ...(view.error === undefined ? {} : { error: view.error })
+    ...(view.error === undefined ? {} : { error: view.error }),
+    ...(view.health === undefined ? {} : { health: view.health })
   });
 }
 

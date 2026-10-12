@@ -74,3 +74,34 @@ test("preserves explicit routing as non-secret task result provenance", async ()
     output: "done"
   });
 });
+
+test("running task exposes bounded local health without altering routing or ending a quiet turn", async () => {
+  let finish: () => void = () => {};
+  const execution = new Promise<{ kind: "completed"; output: string }>((resolve) => {
+    finish = () => resolve({ kind: "completed", output: "done" });
+  });
+  const executor: CodexTaskExecutor = {
+    execute: () => execution,
+    interrupt: async () => {},
+    healthSnapshot: () => ({
+      state: "running",
+      process_state: "no_exit_observed",
+      last_protocol_at: "2026-10-12T08:00:00.000Z",
+      last_checked_at: "2026-10-12T08:03:00.000Z",
+      quiet_for_ms: 180_000,
+      checks: 1,
+      observation: "quiet_unconfirmed"
+    })
+  };
+  const service = new ThinCodexTaskService({ resolve: () => WORKSPACE }, () => executor);
+  const { taskId } = service.startTask({ workspace_id: "known", instruction: "secret-instruction" });
+  await waitForExecution();
+  const view = service.taskView(taskId);
+  assert.equal(view?.state, "running");
+  assert.equal(view?.health?.checks, 1);
+  assert.equal(view?.health?.observation, "quiet_unconfirmed");
+  assert.equal(JSON.stringify(view).includes("secret-instruction"), false);
+  finish();
+  await waitForExecution();
+  assert.equal(service.taskView(taskId)?.state, "completed");
+});
