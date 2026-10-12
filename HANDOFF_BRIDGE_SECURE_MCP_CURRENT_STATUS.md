@@ -1,5 +1,15 @@
 # Engineering Bridge Secure MCP — Current Production Status
 
+## 2026-10-12 — 1.4.2-biaogu.17 PREPARED / CANARY PASS, CUTOVER BLOCKED
+
+Source main contains the .17 release. Immutable .17 and its real Codex canary
+have passed. However existing app-server children were observed under BOTH
+live Bridge Blue and Green, and the thin interface cannot prove those tasks
+are already complete. Deployment intentionally stopped before version pointer
+switch or service restart. Live runtime remains **1.4.2-biaogu.16**. See
+docs/HANDOFF_BRIDGE_BIAOGU17_PRODUCTION_DEPLOY_GATE_20261012.md for the
+exact source, manifest, active-process evidence and remaining safe cutover gate.
+
 ## 2026-10-12 — Quiet Codex Task Source Integration (NOT DEPLOYED)
 
 Owner approved Engineering Bridge source I/W for the fix replacing the thin
