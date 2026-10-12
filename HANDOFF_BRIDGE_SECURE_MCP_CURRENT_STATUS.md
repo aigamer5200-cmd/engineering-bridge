@@ -1,5 +1,18 @@
 # Engineering Bridge Secure MCP — Current Production Status
 
+## 2026-10-12 — Quiet Codex Task Source Integration (NOT DEPLOYED)
+
+Owner approved Engineering Bridge source I/W for the fix replacing the thin
+Codex app-server's 120-second silent-turn termination with non-invasive
+three-minute local health observations. Candidate real Codex App Server smoke,
+125-second real-clock quiet simulation, and complete unit regression passed.
+Details: docs/HANDOFF_BRIDGE_CODEX_QUIET_TASK_IW_20261012.md.
+
+**Runtime deployment remains separate.** The currently live immutable
+1.4.2-biaogu.16 remains unchanged; a subsequent guarded immutable candidate
+promotion and owner-authorized production switch are required before the live
+MCP routes inherit the fix. Keep old Blue/Green startup and rollback intact.
+
 Updated: 2026-10-06
 Production I/W: completed
 
