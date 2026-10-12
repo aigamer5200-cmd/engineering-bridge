@@ -34,6 +34,7 @@ $guardRuntime = "D:\ShoestringGoalData\development-execution-guard"
 $tunnelClient = Join-Path $Root "tunnel-client\v0.0.15\tunnel-client.exe"
 $tunnelProfile = Join-Path $env:APPDATA "tunnel-client\$Profile.yaml"
 $startupLog = Join-Path $logsRoot "green-startup-events.jsonl"
+$greenDevSpaceStartupTimeoutSeconds = 240
 $script:StartupCurrentStage = $null
 $script:StartupStageTimer = $null
 
@@ -268,10 +269,10 @@ function Start-Green {
         } finally {
             if ($null -eq $oldConfig) { Remove-Item Env:\DEVSPACE_CONFIG_DIR -ErrorAction SilentlyContinue } else { $env:DEVSPACE_CONFIG_DIR = $oldConfig }
         }
-        $listener = Wait-ExpectedListener -Port $GreenUpstreamPort -ExpectedName "node.exe" -CommandPattern "secure-tunnel-beta\\source\\bin\\devspace\.js serve" -Seconds 120
-        if ($null -eq $listener) { throw "Green DevSpace failed to listen on $GreenUpstreamPort within 120 seconds. Inspect $stderr" }
+        $listener = Wait-ExpectedListener -Port $GreenUpstreamPort -ExpectedName "node.exe" -CommandPattern "secure-tunnel-beta\\source\\bin\\devspace\.js serve" -Seconds $greenDevSpaceStartupTimeoutSeconds
+        if ($null -eq $listener) { throw "Green DevSpace failed to listen on $GreenUpstreamPort within $greenDevSpaceStartupTimeoutSeconds seconds. Inspect $stderr" }
     }
-    Complete-StartupStage -Status $(if ($devspaceWasReady) { "REUSED" } else { "READY" }) -Detail "port=$GreenUpstreamPort; timeout=120s"
+    Complete-StartupStage -Status $(if ($devspaceWasReady) { "REUSED" } else { "READY" }) -Detail "port=$GreenUpstreamPort; timeout=${greenDevSpaceStartupTimeoutSeconds}s"
 
     Start-StartupStage -Stage "green_guard"
     $green = Get-GreenStatus

@@ -8,9 +8,11 @@ const script = readFileSync(
   "utf8",
 ).replace(/\r\n/gu, "\n");
 
-test("Green DevSpace cold start gets 120 seconds without widening other service waits", () => {
-  assert.match(script, /-Port \$GreenUpstreamPort -ExpectedName "node\.exe" -CommandPattern [^\n]+ -Seconds 120/u);
-  assert.match(script, /within 120 seconds\. Inspect \$stderr/u);
+test("Green DevSpace cold start gets 240 seconds without widening other service waits", () => {
+  assert.match(script, /\$greenDevSpaceStartupTimeoutSeconds = 240/u);
+  assert.match(script, /-Port \$GreenUpstreamPort -ExpectedName "node\.exe" -CommandPattern [^\n]+ -Seconds \$greenDevSpaceStartupTimeoutSeconds/u);
+  assert.match(script, /within \$greenDevSpaceStartupTimeoutSeconds seconds\. Inspect \$stderr/u);
+  assert.match(script, /timeout=\$\{greenDevSpaceStartupTimeoutSeconds\}s/u);
   assert.match(script, /-Port \$GreenProxyPort -ExpectedName "node\.exe" -CommandPattern [^\n]+ -Seconds 30/u);
   assert.match(script, /-Port \$TunnelHealthPort -ExpectedName "tunnel-client\.exe" -CommandPattern [^\n]+\n/u);
   assert.match(script, /\[int\]\$Seconds = 45/u);
