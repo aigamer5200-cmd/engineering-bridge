@@ -1,5 +1,42 @@
 # Bridge 1.4.2-biaogu.17｜Production Deploy Gate (2026-10-12)
 
+## FINAL DEPLOYMENT ACCEPTED — 2026-10-12 (supersedes earlier safety block)
+
+- Owner 明確回覆目前 Blue／Green 沒有正在執行中、需要保留的任務，同意立即切換。
+- 既有版本管理器執行 `switch --version 1.4.2-biaogu.17 --confirmation SWITCH`
+  成功；`status=SWITCHED`，Blue 新 production PID 13120。
+- Runtime current-root/current-version 指向
+  `D:/Engineering_Bridge_System/BridgeVersions/1.4.2-biaogu.17`，
+  `previous_version=1.4.2-biaogu.16`。
+- 使用正式 `STOP_Secure_MCP_Bridge.bat` 關閉舊 Green，回報
+  `SECURE_MCP_BRIDGE_STOP_PASS`，期間 Blue 保持 READY。
+- 使用正式 `START_Secure_MCP_Bridge.bat` 重啟 Green，回報
+  `SECURE_MCP_BRIDGE_START_PASS`，HTTP /readyz=200。控制腳本
+  輸出 PASS，但工具 session 仍持續占用輸出 handle；後續以實際連線驗證。
+- Green 新連線實際呼叫 `gpt-6.1-sol / medium / standard` 回覆
+  `BRIDGE_GREEN_BIAOGU17_OK`，`task_result` 包含新 `health`
+  結構（running 及 completed 均可讀），可證實 Green 載入 .17 而非只看 Tunnel READY。
+- Blue 新連線實際呼叫同模型回覆 `BRIDGE_BLUE_BIAOGU17_OK`，
+  `task_result.health` 同樣成功。
+- 切換後版本管理器 `verify`：PASS；MCP unauth local/public 401、
+  OAuth metadata local/public 200，Codex provider pointers 正常。
+- Root 系統 `CHECK_CHANNELS.bat` Exit 0；DevSpace Blue／Green、Bridge
+  Blue／Green、local/public OAuth、Cloudflare metrics 和 Recovery 全部 READY。
+- 不動 DS、Tunnel ID/profile、帳號、GOAL、模型路由、任何正式產品 Repository。
+  舊 .16 immutable runtime 完整保留；不需重新建立 OpenAI/Cloudflare connector。
+
+### 殘留註記
+
+- 本次之前已有隔離真實時間 125 秒靜默協定模擬 PASS，證明不再因
+  120 秒靜默無條件殺掉；本次正式環境完成的是真實短任務 Blue／Green
+  往返，尚未額外佔用模型執行一個真正的 125 秒全靜默長任務。
+- 健康觀察中的 `quiet_unconfirmed` 不代表真正卡死，只供監測與後續 DS 排查。
+- 若正式日後出現確定性退化，可用版本管理器受控回滾到 .16；
+  回滾前仍需確認沒有正在執行中的 Codex 任務。
+
+以下原始 PREPARED／BLOCKED 段落保留為切換之前的歷史查核證據，
+**不再代表目前狀態**。
+
 ## Release and intent
 
 - Owner explicitly approved formal Production deployment after source I/W.

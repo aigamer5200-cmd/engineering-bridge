@@ -1,5 +1,31 @@
 # Engineering Bridge Secure MCP — Current Production Status
 
+## 2026-10-12 — .17 PRODUCTION DEPLOYED / ACCEPTED
+
+正式 Bridge Runtime 已由 1.4.2-biaogu.16 切換為 **1.4.2-biaogu.17**；
+版本管理器狀態、current-root 與 current-version 三者一致，.16 保留為 recorded
+previous / immediate rollback target。新版程式來自 commit
+`aafd08aa61e94d32feef413b1a8f95f8cb060801`，並非直接修改 .16。
+
+- Version-manager `prepare`、Canary 與 `switch --confirmation SWITCH`：PASS。
+- 獨立 candidate Canary：真實 Codex 呼叫 PASS、四個 MCP tools 不變、sandbox 無變更。
+- Blue 正式 MCP gateway：切換到 .17 後重新啟動，Production `verify` PASS。
+- Green 專屬 Secure MCP：經 Owner 授權確認沒有必須保留的執行中任務後，
+  使用正式 STOP／START 控制器重新載入 .17；Green /readyz HTTP 200。
+- 真實 Blue 呼叫 `gpt-6.1-sol / medium / standard`：
+  `BRIDGE_BLUE_BIAOGU17_OK`，`task_result.health` 存在。
+- 真實 Green 呼叫 `gpt-6.1-sol / medium / standard`：
+  `BRIDGE_GREEN_BIAOGU17_OK`，`task_result.health` 存在。
+- 切換後 `verify`：local/public MCP unauth 401、OAuth metadata 200。
+- `CHECK_CHANNELS.bat`：Exit 0。DevSpace Blue／Green、Bridge Blue／Green、
+  Bridge public OAuth、Cloudflare metrics、Recovery 全數 READY。
+- .17 去除了 120 秒協定靜默即強制終止的路徑，改用 180 秒非侵入式本機巡檢；
+  原有 RPC 建立期逾時、協定錯誤與手動中止行為仍保留。
+
+下方「CUTOVER BLOCKED」記錄是較早的歷史關卡，已由本次 Owner 解除。
+完整最終證據與後續維運參考
+`docs/HANDOFF_BRIDGE_BIAOGU17_PRODUCTION_DEPLOY_GATE_20261012.md`。
+
 ## 2026-10-12 — 1.4.2-biaogu.17 PREPARED / CANARY PASS, CUTOVER BLOCKED
 
 Source main contains the .17 release. Immutable .17 and its real Codex canary
