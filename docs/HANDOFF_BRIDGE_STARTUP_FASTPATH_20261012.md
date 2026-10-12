@@ -33,3 +33,16 @@
 - **Owner Human Gate:** request I/W only after review. Upon authorization, integrate both prerequisite and speed-up commits in order, back up **only** the affected live controller/BAT, verify reviewed hashes, and deploy without restarting running DS. Avoid overwriting any source edited since snapshot.
 - At the next naturally scheduled full start, record durations and first-try health of Blue/Green, Bridge, Tunnel and Recovery. If unexpectedly slow, investigate cold-start cleanup and real service health separately instead of further guessing or removing safety checks.
 - Known unrelated pending: Codex CLI `sentry_goal` OAuth refresh warning previously observed; CLI itself passed `gpt-6.1-sol` execution check on 2026-10-12. Do not touch credentials in this task.
+
+## Owner-approved I/W and live script deployment — 2026-10-12
+
+- Owner explicitly authorized **I/W**. After `git fetch origin main`, canonical local `main` and GitHub `origin/main` both matched the clean `5d60a59` baseline; the isolated branch was a straight two-commit descendant.
+- Fast-forward integrated `8133103` then `268504b` onto local `main`; `git push origin main` succeeded, and `git ls-remote origin refs/heads/main` confirmed **`268504b24e553123bac82a3a15e8d45beb48a22a`**.
+- Confirmed the pre-deploy Green controller SHA-256 `27B98D2FBD6B772755FCDD2FD960C3B74BD0D94FEB5055B73B790A40CA200BDF` and Bridge launcher SHA-256 `974036952DEACE69232F8FFD6E744D5C278D89AF7E1B7493E686AF844BDCDFC7`.
+- Verified backup copies for **both** affected live files at `D:\Engineering_Bridge_System\backups\control\startup-fastpath-20261012-20261012-145020`. The attempted `.NET File.Replace` operation failed without changing either live target; a checksum re-check confirmed both were still their original versions.
+- Completed a safe backup-backed overwrite using `Copy-Item -Force`, with immediate post-write SHA-256 verification and a bounded rollback path on failure. Both files were successfully updated **without stopping, restarting or reconnecting DS / Bridge / either Tunnel**:
+  - Green runtime controller: `D:\Engineering_Bridge_System\DevSpace\canary\secure-tunnel-beta\control\SecureMcpDevSpace.ps1` = SHA-256 `60C34557EA9A555A93E86877CB4528A02213B9E9263EA5C3D2F929B985DBE567`.
+  - Bridge dual-lane launcher: `D:\Engineering_Bridge_System\control\START_ENGINEERING_BRIDGE_ALL.bat` = SHA-256 `7C73B34F7924A2EF59A6B40BA8E0DBC115CF57F802F62516FA34DB622A632307`.
+- Deployed Green controller also passed PowerShell AST syntax parsing. These updated scripts will affect **subsequent starts**, not existing listener processes.
+- Read-only post-deploy canonical `D:\Engineering_Bridge_System\control\CHECK_CHANNELS.bat` returned **exit 0**: DevSpace Blue/Green, Tunnel 18080 `/readyz`, Bridge Blue/Green, Bridge Tunnel 18081 `/readyz`, local/public OAuth, tunnel metrics and Engineering Recovery all reported **READY**.
+- The next natural startup remains the authoritative cold/warm **latency and first-try success** acceptance; no production cold restart was performed as part of this I/W.

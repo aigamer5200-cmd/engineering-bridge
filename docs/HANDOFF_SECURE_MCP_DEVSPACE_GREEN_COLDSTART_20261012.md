@@ -55,3 +55,10 @@
 - The 240-second cold-start path should be checked during the next **natural** Windows reboot; do not force a service disruption only for this test.
 - Once local checkpoint is reviewed, seek Owner authorization for Git I/W (integrate branch into main and sync remote), if required. Runtime hotfix does **not** by itself constitute repository I/W.
 - Update this handoff if any final verification fails. Keep repository clean and preserve the isolated checkpoint for the next window.
+
+## I/W resolved (2026-10-12)
+
+- The earlier "seek Owner authorization" note above is historical: Owner approved I/W in the follow-up startup-speed phase.
+- Both this prerequisite checkpoint `8133103` and the dependent fastpath checkpoint `268504b` were fast-forward integrated into local `main` and pushed to GitHub `origin/main`.
+- The live DevSpace Green controller now contains the 240-second cold-start allowance **and** the startup fastpath. Backup, deployed hashes, no-restart mechanics and the full post-deployment channel PASS are recorded in `docs/HANDOFF_BRIDGE_STARTUP_FASTPATH_20261012.md`.
+- Still pending until the next naturally scheduled startup: real cold-start duration / first-attempt reliability. Do not force a stop or restart of currently active DS purely for benchmarking.
