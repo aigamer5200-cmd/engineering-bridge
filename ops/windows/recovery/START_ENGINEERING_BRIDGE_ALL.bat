@@ -30,12 +30,9 @@ if errorlevel 1 (
   exit /b 75
 )
 
-call "%CONTROL%\STATUS_Secure_MCP_Bridge.bat"
-if errorlevel 1 (
-  echo [FAIL] Engineering Bridge Secure MCP Green final verification failed.
-  echo Blue rollback remains untouched as the last-known-good lane.
-  exit /b 76
-)
+rem START_Secure_MCP_Bridge already validates expected owner and HTTP readyz.
+rem Do not repeat its full status scan here. The master START_ALL_CHANNELS
+rem runs CHECK_CHANNELS after the watchdog, preserving the final health gate.
 
 echo Engineering Bridge Secure MCP Green primary : READY
 echo Engineering Bridge Cloudflare Blue rollback : READY

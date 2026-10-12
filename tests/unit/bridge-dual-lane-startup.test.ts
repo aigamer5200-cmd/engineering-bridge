@@ -26,7 +26,7 @@ test("master startup delegates Bridge and stops before watchdog on failure", () 
   assert.match(master, /START_ENGINEERING_BRIDGE_ALL\.bat"\nif errorlevel 1 \(\n  echo \[FAIL\][^\n]+\n  exit \/b %ERRORLEVEL%\n\)/u);
 });
 
-test("Bridge startup reads the current version and verifies Blue then Green before READY", () => {
+test("Bridge startup verifies Blue then Green once while master preserves final health gate", () => {
   const start = readControl("START_ENGINEERING_BRIDGE_ALL.bat");
   assert.ok(start.includes('set "VERSION_FILE=D:\\Engineering_Bridge_System\\runtime\\bridge-current-version.txt"'));
   assert.ok(start.includes('set /p "BRIDGE_VERSION=" < "%VERSION_FILE%"'));
@@ -34,11 +34,12 @@ test("Bridge startup reads the current version and verifies Blue then Green befo
   assert.match(start, /if not exist "%VERSION_FILE%" \([\s\S]*?exit \/b 74\n\)/u);
   assert.match(start, /if not defined BRIDGE_VERSION \([\s\S]*?exit \/b 74\n\)/u);
   assert.ok(!start.includes("1.4.2-biaogu.16"));
-  orderedCalls(start, ["START_BRIDGE_CHANNEL", "START_Secure_MCP_Bridge", "STATUS_Secure_MCP_Bridge"]);
+  orderedCalls(start, ["START_BRIDGE_CHANNEL", "START_Secure_MCP_Bridge"]);
   assert.match(start, /START_BRIDGE_CHANNEL\.bat"\nif errorlevel 1 \([^)]*exit \/b 72\n\)/u);
   assert.match(start, /START_Secure_MCP_Bridge\.bat"\nif errorlevel 1 \([^)]*Blue rollback remains untouched[^)]*exit \/b 75\n\)/u);
-  assert.match(start, /STATUS_Secure_MCP_Bridge\.bat"\nif errorlevel 1 \([^)]*Blue rollback remains untouched[^)]*exit \/b 76\n\)/u);
-  assert.ok(start.indexOf("Green primary : READY") > start.indexOf(call("STATUS_Secure_MCP_Bridge")));
+  assert.ok(!start.includes(call("STATUS_Secure_MCP_Bridge")));
+  assert.ok(start.indexOf("Green primary : READY") > start.indexOf(call("START_Secure_MCP_Bridge")));
+  assert.ok(readControl("START_ALL_CHANNELS.bat").includes(call("CHECK_CHANNELS")));
   assert.ok(start.includes("Blue rollback : READY"));
   assert.doesNotMatch(start, /call .*STOP_|call .*ROLLBACK_/u);
 });

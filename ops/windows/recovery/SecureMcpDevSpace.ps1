@@ -271,11 +271,14 @@ function Start-Green {
         }
         $listener = Wait-ExpectedListener -Port $GreenUpstreamPort -ExpectedName "node.exe" -CommandPattern "secure-tunnel-beta\\source\\bin\\devspace\.js serve" -Seconds $greenDevSpaceStartupTimeoutSeconds
         if ($null -eq $listener) { throw "Green DevSpace failed to listen on $GreenUpstreamPort within $greenDevSpaceStartupTimeoutSeconds seconds. Inspect $stderr" }
+        $green.Upstream = $listener
+        $green.UpstreamOk = $true
     }
     Complete-StartupStage -Status $(if ($devspaceWasReady) { "REUSED" } else { "READY" }) -Detail "port=$GreenUpstreamPort; timeout=${greenDevSpaceStartupTimeoutSeconds}s"
 
     Start-StartupStage -Stage "green_guard"
-    $green = Get-GreenStatus
+    # Reuse the validated preflight snapshot; each freshly started listener is
+    # verified by Wait-ExpectedListener and the complete state is rechecked below.
     $guardWasReady = $green.ProxyOk
     if (-not $green.ProxyOk) {
         $stdout = Join-Path $logsRoot "green-production-guard.stdout.log"
@@ -302,11 +305,12 @@ function Start-Green {
         }
         $listener = Wait-ExpectedListener -Port $GreenProxyPort -ExpectedName "node.exe" -CommandPattern "DevSpace\\devspace_development_guard_proxy\.mjs" -Seconds 30
         if ($null -eq $listener) { throw "Green Guard failed to listen on $GreenProxyPort. Inspect $stderr" }
+        $green.Proxy = $listener
+        $green.ProxyOk = $true
     }
     Complete-StartupStage -Status $(if ($guardWasReady) { "REUSED" } else { "READY" }) -Detail "port=$GreenProxyPort; timeout=30s"
 
     Start-StartupStage -Stage "green_tunnel"
-    $green = Get-GreenStatus
     $tunnelWasReady = $green.TunnelOk
     if (-not $green.TunnelOk) {
         $version = (& $tunnelClient --version 2>&1 | Out-String).Trim()
@@ -333,6 +337,8 @@ function Start-Green {
         }
         $listener = Wait-ExpectedListener -Port $TunnelHealthPort -ExpectedName "tunnel-client.exe" -CommandPattern "run\s+--profile\s+$([regex]::Escape($Profile))"
         if ($null -eq $listener) { throw "tunnel-client failed to expose health port $TunnelHealthPort. Inspect $stderr" }
+        $green.Tunnel = $listener
+        $green.TunnelOk = $true
     }
     Complete-StartupStage -Status $(if ($tunnelWasReady) { "REUSED" } else { "READY" }) -Detail "port=$TunnelHealthPort; timeout=45s"
 
