@@ -1,5 +1,23 @@
 # Release notes
 
+## v1.4.2-biaogu.17
+
+This thin-transport hardening release prevents an otherwise healthy, complex
+Codex turn from being terminated just because the app-server protocol has been
+quiet for 120 seconds.
+
+- Removes the silent-turn 120-second automatic process termination.
+- Adds read-only, local task health sampling every three minutes. Silence is
+  reported as `quiet_unconfirmed`, never as a failure or a reason to kill.
+- Includes an optional bounded, non-secret `health` response in `task_result`.
+- Preserves RPC handshake timeouts, protocol validation, process-exit detection
+  and explicit task interruption.
+- Keeps the existing four MCP tools, routing, transports, credentials,
+  authorization, and rollback topology unchanged.
+- Source integration full tests: 430 PASS / 0 FAIL / 5 SKIP. Candidate
+  real-Codex smoke and 125-second wall-clock silent-turn protocol Canary PASS.
+
+
 ## v1.4.2-biaogu.16
 
 This release selectively reconciles upstream v1.5.0 hardening into the active four-tool thin transport without merging the upstream feature surface.
