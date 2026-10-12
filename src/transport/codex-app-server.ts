@@ -19,6 +19,18 @@ export interface CodexTaskRequest {
 export interface CodexTaskExecutor {
   execute(request: CodexTaskRequest): Promise<CodexTaskResult>;
   interrupt(): Promise<void>;
+  healthSnapshot?(): CodexTaskHealth | undefined;
+}
+
+/** Read-only observation. Silence alone cannot prove that Codex is stuck. */
+export interface CodexTaskHealth {
+  readonly state: "running" | "completed" | "failed" | "interrupted";
+  readonly process_state: "no_exit_observed" | "exited";
+  readonly last_protocol_at: string;
+  readonly last_checked_at: string | null;
+  readonly quiet_for_ms: number;
+  readonly checks: number;
+  readonly observation: "protocol_active" | "quiet_unconfirmed" | "exited";
 }
 
 export type ProcessStarter = (
@@ -31,7 +43,7 @@ export interface TransportTiming {
   readonly interruptGraceMs: number;
   readonly killGraceMs: number;
   readonly rpcCallTimeoutMs: number;
-  readonly protocolInactivityTimeoutMs?: number;
+  readonly healthCheckIntervalMs?: number;
 }
 
 const CODEX_NODE_TARGET = ["@openai", "codex", "bin", "codex.js"] as const;
@@ -40,7 +52,8 @@ const MAX_PRE_RESPONSE_BYTES = 65_536;
 const DEFAULT_TIMING: TransportTiming = {
   interruptGraceMs: 5_000,
   killGraceMs: 2_000,
-  rpcCallTimeoutMs: 30_000
+  rpcCallTimeoutMs: 30_000,
+  healthCheckIntervalMs: 3 * 60_000
 };
 
 type PendingCall = {
@@ -107,6 +120,20 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
   private nextId = 1;
   private readonly pending = new Map<number, PendingCall>();
   private beginInterrupt: (() => void) | undefined;
+  private health: CodexTaskHealth | undefined;
+
+  healthSnapshot(): CodexTaskHealth | undefined {
+    if (this.health === undefined) return undefined;
+    const quiet_for_ms = Math.max(0, Date.now() - Date.parse(this.health.last_protocol_at));
+    return {
+      ...this.health,
+      quiet_for_ms,
+      observation: this.health.process_state === "exited"
+        ? "exited"
+        : quiet_for_ms >= (this.timing.healthCheckIntervalMs ?? 180_000)
+          ? "quiet_unconfirmed" : "protocol_active"
+    };
+  }
 
   constructor(
     private readonly workspaceRoot: string,
@@ -118,6 +145,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
 
   async execute(request: CodexTaskRequest): Promise<CodexTaskResult> {
     if (this.child !== undefined) return { kind: "failed", error: "Codex task is already running." };
+    this.health = undefined;
     this.threadId = undefined;
     this.turnId = undefined;
     this.startedTurnId = undefined;
@@ -160,9 +188,37 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     let interruptTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let exitImmediate: NodeJS.Immediate | undefined;
-    let inactivityTimer: NodeJS.Timeout | undefined;
+    let healthTimer: NodeJS.Timeout | undefined;
     let earlyNotifications: string[] = [];
     let earlyBytes = 0;
+    this.health = {
+      state: "running",
+      process_state: "no_exit_observed",
+      last_protocol_at: new Date().toISOString(),
+      last_checked_at: null,
+      quiet_for_ms: 0,
+      checks: 0,
+      observation: "protocol_active"
+    };
+
+    const noteProtocolActivity = (): void => {
+      if (this.health !== undefined) {
+        this.health = { ...this.health, last_protocol_at: new Date().toISOString() };
+      }
+    };
+
+    // Read-only local observation; no task cancellation on silence.
+    const healthCheckIntervalMs = this.timing.healthCheckIntervalMs ?? 3 * 60_000;
+    healthTimer = setInterval(() => {
+      if (settled || this.health === undefined) return;
+      this.health = {
+        ...this.health,
+        process_state: directExited ? "exited" : "no_exit_observed",
+        last_checked_at: new Date().toISOString(),
+        checks: this.health.checks + 1
+      };
+    }, healthCheckIntervalMs);
+    healthTimer.unref();
 
     const rejectPending = (): void => {
       for (const [id, waiter] of this.pending) {
@@ -179,7 +235,14 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
       if (interruptTimer !== undefined) clearTimeout(interruptTimer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       if (exitImmediate !== undefined) clearImmediate(exitImmediate);
-      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
+      if (healthTimer !== undefined) clearInterval(healthTimer);
+      if (this.health !== undefined) {
+        this.health = {
+          ...this.health,
+          state: finalResult.kind,
+          process_state: directExited ? "exited" : "no_exit_observed"
+        };
+      }
       rejectPending();
       if (this.child === child) {
         this.child = undefined;
@@ -222,19 +285,8 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
     const beginTermination = (result: CodexTaskResult, cooperativeMs: number): void => {
       if (settled || terminationResult !== undefined) return;
       terminationResult = result;
-      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
       if (cooperativeMs === 0) sendTerm();
       else interruptTimer = setTimeout(sendTerm, cooperativeMs);
-    };
-
-    const resetInactivity = (): void => {
-      if (settled || terminationResult !== undefined) return;
-      if (inactivityTimer !== undefined) clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(() => beginTermination({
-        kind: "failed", error: "Codex app-server stopped responding.",
-        ...(output === "" ? {} : { output }),
-        ...(this.threadId === undefined ? {} : { threadId: this.threadId })
-      }, 0), this.timing.protocolInactivityTimeoutMs ?? 120_000);
     };
 
     this.beginInterrupt = (): void => {
@@ -299,7 +351,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
             }
             if (waiter.method === "turn/start") {
               this.turnId = value.id;
-              resetInactivity();
+              noteProtocolActivity();
             } else this.threadId = value.id;
           }
           this.pending.delete(parsed.id as number);
@@ -341,7 +393,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
         return;
       }
       if (params.threadId === this.threadId && this.turnId !== undefined && params.turnId === this.turnId) {
-        resetInactivity();
+        noteProtocolActivity();
       }
       if ((parsed.method === "turn/started" || parsed.method === "turn/completed") &&
           (typeof params.threadId !== "string" || !object(params.turn) ||
@@ -354,7 +406,7 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
         if (params.threadId === this.threadId && typeof turn.id === "string" &&
             turn.id === this.turnId) {
           this.startedTurnId = turn.id;
-          resetInactivity();
+          noteProtocolActivity();
         }
         return;
       }
@@ -448,12 +500,21 @@ export class CodexAppServerTransport implements CodexTaskExecutor {
 
     child.on("exit", (code) => {
       directExited = true;
+      if (this.health !== undefined) {
+        this.health = { ...this.health, process_state: "exited" };
+      }
       exitImmediate = setImmediate(() => {
         exitImmediate = undefined;
         finishFromExit(code);
       });
     });
-    child.on("close", finishFromExit);
+    child.on("close", (code) => {
+      directExited = true;
+      if (this.health !== undefined) {
+        this.health = { ...this.health, process_state: "exited" };
+      }
+      finishFromExit(code);
+    });
 
     try {
       await this.call("initialize", { clientInfo: { name: "engineering-bridge", version: VERSION } });

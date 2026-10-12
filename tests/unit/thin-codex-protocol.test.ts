@@ -39,7 +39,7 @@ function harness(onTurn: (message: Message, stdout: PassThrough, child: EventEmi
     Object.assign(child, { stdin, stdout, stderr, pid: undefined,
       kill(signal: string) { signals.push(signal); return true; } });
     return child as unknown as ChildProcessWithoutNullStreams;
-  }, {}, "win32", { rpcCallTimeoutMs: 30, interruptGraceMs: 1, killGraceMs: 1, protocolInactivityTimeoutMs: 30 });
+  }, {}, "win32", { rpcCallTimeoutMs: 30, interruptGraceMs: 1, killGraceMs: 1, healthCheckIntervalMs: 15 });
   return { transport, requests, signals };
 }
 
@@ -176,11 +176,32 @@ for (const method of ["thread/start", "turn/start"]) test(`${method} malformed r
   assert.equal((await h.transport.execute({ instruction: "test" })).kind, "failed");
 });
 
-test("response without started notification has a bounded inactivity watchdog", async () => {
+test("quiet Codex remains running across repeated health checks until a real terminal event", async () => {
+  const h = harness((m, out) => {
+    out.write(line({ id: m.id, result: { turn: { id: "turn" } } }));
+    setTimeout(() => out.write(line(item("long-task-finished")) + line(completed())), 100);
+  });
+  const running = h.transport.execute({ instruction: "long task" });
+  await new Promise<void>((resolve) => setTimeout(resolve, 75));
+  const snapshot = h.transport.healthSnapshot();
+  assert.equal(snapshot?.state, "running");
+  assert.equal(snapshot?.process_state, "no_exit_observed");
+  assert.equal(snapshot?.observation, "quiet_unconfirmed");
+  assert.ok((snapshot?.checks ?? 0) >= 2);
+  assert.equal(snapshot?.last_checked_at !== null, true);
+  assert.deepEqual(await running, { kind: "completed", output: "long-task-finished", threadId: "thread" });
+  assert.equal(h.transport.healthSnapshot()?.state, "completed");
+});
+
+test("quiet Codex can be explicitly interrupted after multiple observation intervals", async () => {
   const h = harness((m, out) => out.write(line({ id: m.id, result: { turn: { id: "turn" } } })));
-  const result = await h.transport.execute({ instruction: "test" });
-  assert.equal(result.kind, "failed");
-  assert.match(JSON.stringify(result), /stopped responding/);
+  const running = h.transport.execute({ instruction: "long task" });
+  await new Promise<void>((resolve) => setTimeout(resolve, 75));
+  assert.equal(h.transport.healthSnapshot()?.state, "running");
+  await h.transport.interrupt();
+  assert.equal((await running).kind, "interrupted");
+  assert.equal(h.transport.healthSnapshot()?.state, "interrupted");
+  assert.ok(h.signals.length > 0);
 });
 
 test("early started event permits interruption; RPC rejection preserves interrupted output", async () => {

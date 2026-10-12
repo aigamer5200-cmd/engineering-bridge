@@ -1,6 +1,6 @@
 import { isId, newId, type Id } from "../core/ids.js";
 import { CodexAppServerTransport } from "../transport/codex-app-server.js";
-import type { CodexTaskExecutor } from "../transport/codex-app-server.js";
+import type { CodexTaskExecutor, CodexTaskHealth } from "../transport/codex-app-server.js";
 
 const MAX_TERMINAL_TASK_HISTORY = 100;
 
@@ -24,6 +24,7 @@ export interface ThinCodexTaskView {
   readonly output?: string;
   readonly error?: string;
   readonly partialOutput?: string;
+  readonly health?: CodexTaskHealth;
 }
 
 export type ThinCodexExecutorFactory = (workspaceRoot: string) => CodexTaskExecutor;
@@ -74,6 +75,7 @@ export class ThinCodexTaskService {
     if (!isId(taskId)) return undefined;
     const record = this.tasks.get(taskId);
     if (record === undefined) return undefined;
+    const health = record.executor.healthSnapshot?.();
     return {
       taskId,
       state: record.state,
@@ -83,7 +85,8 @@ export class ThinCodexTaskService {
       ...(record.threadId === undefined ? {} : { threadId: record.threadId }),
       ...(record.output === undefined ? {} : { output: record.output }),
       ...(record.error === undefined ? {} : { error: record.error }),
-      ...(record.partialOutput === undefined ? {} : { partialOutput: record.partialOutput })
+      ...(record.partialOutput === undefined ? {} : { partialOutput: record.partialOutput }),
+      ...(health === undefined ? {} : { health })
     };
   }
 
